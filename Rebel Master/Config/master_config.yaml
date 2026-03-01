@@ -8,7 +8,7 @@ mt5:
   login: 10020166
   password: "Marty123#"                # Fill in your password
   server: "Axi-us50-demo"                  # Fill in your server (e.g., "Axi-Live")
-  path: "C:/Rebel Master/terminal64.exe"
+  path: "C:/ Rebel Master/terminal64.exe"
 scanner:
   symbols:
     - EURUSD

@@ -36925,3 +36925,5 @@
 2026-02-27 10:57:25 | ATTEMPT | ZARJPY attempts=152
 2026-02-27 11:00:30 | ATTEMPT | COPPER.fs attempts=2
 2026-02-27 11:00:30 | TRADE_OPENED | COPPER.fs (metals) | Class: 5/8 | Daily: 32 | Weekly: 149
+2026-03-01 14:48:35 | DAY_RESET | New day. Yesterday: 32 trades [forex:18, crypto:2, metals:5, indices:6, energies:1]
+2026-03-01 14:48:35 | DAY_RESET | All symbol attempt counters reset to 0
