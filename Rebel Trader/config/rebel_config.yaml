@@ -1,0 +1,376 @@
+# =============================================================================
+# REBEL RULES-BASED AI TRADING SYSTEM
+# Configuration File
+# =============================================================================
+
+# --- Engine Settings ---
+rules_version_id: "RT_RULES_v1_5_0"   # Bump when settings change — tracked in trade records + RF data
+scan_interval: 60          # Seconds between scans
+timeframe: "H1"           # M1, M5, M15, M30, H1, H4, D1
+candle_history: 300        # Candles to load for analysis
+symbol_suffix: ""          # Add suffix like ".sa" if needed
+
+# --- MT5 Connection ---
+mt5:
+  login: 10018026
+  password: "Marty123#"
+  server: "Axi-us50-demo"
+  path: "C:/Program Files/Axi MetaTrader 5 Terminal/terminal64.exe"
+
+# --- Trading Hours (Kamloops BC / Pacific Time) ---
+trading_hours:
+  enabled: true
+  timezone: "America/Vancouver"    # Pacific Time (BC, Canada)
+  
+  # Weekly Schedule
+  week_start:
+    day: "Sunday"
+    hour: 14                       # 2:00 PM Pacific
+    minute: 0
+  
+  week_end:
+    day: "Friday"
+    hour: 14                       # 2:00 PM Pacific
+    minute: 0
+  
+  # Set to true to close all positions at week end
+  close_positions_at_week_end: true
+
+# --- Symbol Groups (Curated ~40 symbols) ---
+groups:
+  
+  # === 🔵 FX MAJORS (7) ===
+  majors:
+    - EURUSD
+    - GBPUSD
+    - USDJPY
+    - AUDUSD
+    - NZDUSD
+    - USDCAD
+    - USDCHF
+  
+  # === 🔵 FX CROSSES - High Quality (15) ===
+  crosses:
+    # JPY crosses
+    - EURJPY
+    - GBPJPY
+    - AUDJPY
+    - CADJPY
+    - CHFJPY
+    - NZDJPY
+    # Stable minors
+    - EURGBP
+    - EURAUD
+    - GBPAUD
+    - EURNZD
+    - AUDNZD
+    # Commodity FX
+    - USDCNH
+    - USDNOK
+  
+  # === 🟡 METALS (4) ===
+  metals:
+    - XAUUSD
+    - XAGUSD
+    - XAUEUR
+  
+  # === 🔴 INDICES (7) - Heavy hitters only ===
+  indices:
+    - US30
+    - US500
+    - NAS100.fs
+    - USTECH
+    - GER40
+    - DAX40.fs
+    - UK100
+    - US2000
+  
+  # === 🟢 ENERGIES (4) ===
+  energy:
+    - USOIL
+    - WTI.fs
+    - BRENT.fs
+    - NATGAS.fs
+    - UKOIL
+  
+  # === 🟠 SOFTS / INDUSTRIAL (3) ===
+  softs:
+    - COCOA.fs
+    - COFFEE.fs
+    - COPPER.fs
+  
+  # === 🟣 CRYPTO (5) - Whitelist only ===
+  crypto:
+    - ETHUSD
+    - XRPUSD
+    - BNB-USD
+    - LTCUSD
+
+# Which groups to trade
+enabled_groups:
+  - majors
+  - crosses
+  - metals
+  - indices
+  - energy
+  - softs
+  - crypto
+
+# --- Session Activation ---
+# Discrete sessions (no overlap window)
+# Tokyo: 21:00-07:00 UTC | London: 07:00-13:00 UTC | New York: 13:00-21:00 UTC
+session_activation:
+  majors:
+    - TOKYO
+    - LONDON
+    - NEW_YORK
+  
+  crosses:
+    - TOKYO
+    - LONDON
+    - NEW_YORK
+  
+  metals:
+    - TOKYO
+    - LONDON
+    - NEW_YORK
+  
+  indices:
+    - LONDON
+    - NEW_YORK
+  
+  energy:
+    - LONDON
+    - NEW_YORK
+  
+  softs:
+    - LONDON
+    - NEW_YORK
+  
+  crypto:
+    - TOKYO
+    - LONDON
+    - NEW_YORK
+    - WEEKEND
+
+# Per-symbol session overrides (takes priority over group sessions)
+symbol_session_overrides:
+  GER40:
+    - LONDON
+  XAUEUR:
+    - LONDON
+    - NEW_YORK
+
+# --- AI Settings ---
+ai:
+  enabled: true             # Set false to use score-only mode
+  model: "gpt-4o-mini"      # gpt-4o, gpt-4o-mini, gpt-4-turbo
+  temperature: 0.1          # Low = consistent, High = creative
+  min_confidence: 75        # Minimum AI confidence to trade (75%)
+  gpt_enabled: true
+  gpt_observe_at: 0
+  gpt_shadow_start: 0           # Shadow from trade 0 — GPT evaluates but rules decide
+  gpt_veto_start: 1250          # 1250: GPT can veto (block) bad trades
+  gpt_scale_start: 1750         # 1750: GPT controls risk scaling with guardrails
+  gpt_deploy_start: 2250        # 2250: GPT decides fully on its own
+  gpt_veto_risk_scale: 0.5      # Micro scaling during veto phase
+  gpt_scale_max_risk_scale: 1.1  # Guardrail cap during scale phase
+  gpt_deploy_mode: "decide"     # GPT makes the call at deploy
+
+# --- Scanner Integration ---
+# Integrates Rebel Intelligent Scanner with the engine
+# Scanner can STILL run standalone: python Python/Rebel_Intelligent_Scanner.py
+scanner:
+  enabled: false            # Scanner runs standalone (bridge disabled)
+  use_for_signals: true     # Use scanner signals instead of built-in
+  use_aim: true             # Use Rebel AIM for AI analysis
+  min_confidence: 60        # Minimum confidence to consider trading
+
+# --- Scoring Settings ---
+scoring:
+  min_score_to_trade: 60    # Default minimum score
+  min_confidence_to_trade: 60
+  
+  # Component weights (must total 100)
+  weights:
+    trend: 35
+    momentum: 25
+    pattern: 20
+    structure: 20
+
+  # ADX trend filter (minimum ADX required to allow trading)
+  adx_min: 18
+  adx_min_by_group:
+    majors: 18
+    crosses: 25
+    metals: 30
+    indices: 30
+    energy: 30
+    softs: 25
+    crypto: 30
+
+  # Per-group RSI momentum filter (long_min = RSI must be above X for longs, short_max = below X for shorts)
+  rsi_filter_by_group:
+    majors:
+      long_min: 70
+      short_max: 30
+    crosses:
+      long_min: 70
+      short_max: 30
+    metals:
+      long_min: 60
+      short_max: 40
+    indices:
+      long_min: 70
+      short_max: 30
+    energy:
+      long_min: 70
+      short_max: 30
+    softs:
+      long_min: 60
+      short_max: 40
+    crypto:
+      long_min: 50
+      short_max: 50
+  
+  # Group-specific score thresholds (override default)
+  # Lower = looser filters, Higher = tighter filters
+  group_thresholds:
+    majors: 50        # FX
+    crosses: 50       # FX
+    exotics: 50
+    metals: 50
+    indices: 50
+    energy: 50
+    softs: 50
+    crypto: 50
+
+  # Group-specific confidence thresholds (override default)
+  confidence_thresholds:
+    majors: 75
+    crosses: 75
+    exotics: 75
+    metals: 75
+    indices: 75
+    energy: 75
+    softs: 75
+    crypto: 75
+
+# --- Risk Management ---
+risk:
+  # Global Limits
+  max_total_trades: 15           # Max open trades across all
+  max_drawdown_percent: 5.0      # Emergency stop at 5% drawdown
+  max_daily_trades: 35           # Hard daily cap
+  max_risk_per_loop: 2.0         # Lowered slightly for safety
+
+  # Force micro units & safer global risk (NEW)
+  base_volume: 0.01              # Default micro lot size
+  max_volume: 0.01               # Hard cap - NEVER exceed 0.01 lots
+  risk_per_trade: 0.01           # 1% max risk per trade (from your recent change)
+
+  # Optional: Per-family overrides (add if you want later)
+  family_settings:
+    FX:
+      risk_per_trade: 0.008
+      max_open: 4
+    CRYPTO:
+      risk_per_trade: 0.005
+      max_open: 2
+    INDICES:
+      risk_per_trade: 0.01
+      max_open: 3
+    METALS:
+      risk_per_trade: 0.01
+      max_open: 3
+    # Add others as needed (energies, softs)
+
+  # Per-Group Limits
+  group_limits:
+    majors:
+      max_trades: 2
+      risk_scale: 1.0
+
+    crosses:
+      max_trades: 2
+      risk_scale: 0.8
+
+    metals:
+      max_trades: 1
+      risk_scale: 1.0
+
+    indices:
+      max_trades: 2
+      risk_scale: 0.8
+
+    energy:
+      max_trades: 1
+      risk_scale: 0.6
+
+    softs:
+      max_trades: 1
+      risk_scale: 0.5
+
+    crypto:
+      max_trades: 1
+      risk_scale: 0.5
+
+  # Same-symbol handling
+  allow_same_symbol: false  # Allow multiple trades on same symbol?
+
+# --- Trade Execution ---
+execution:
+  dry_run: False              # Change to true for testing, false for real
+  risk_per_trade: 0.01        # 1% max risk per trade (safe for micro)
+  base_volume: 0.01           # Base micro lot size
+  max_volume: 0.01            # HARD CAP - never allow more than 0.01 lots
+  min_volume: 0.01            # Optional: force at least 0.01 (no tiny fractions)
+  rf_target_closed_trades: 1000
+  trade_counter:
+    enabled: true
+    target_trades: 1500
+    start_time: "2026-01-14T00:00:00+00:00"
+    rebuild_from_logs: true
+  governance:
+    enabled: true
+    lock_time: "2026-01-15T18:42:00-08:00"
+    target_trades: 1500
+    rebuild_from_logs: true
+
+# --- Profit Lock (Trailing) ---
+profit_lock:
+  enabled: true
+  
+  # R-based ladder: When profit reaches trigger_r * R, lock at lock_r * R
+  profit_ladder_r:
+    - trigger_r: 0.50
+      lock_r: 0.20
+    - trigger_r: 0.80
+      lock_r: 0.35
+    - trigger_r: 1.20
+      lock_r: 0.60
+    - trigger_r: 1.80
+      lock_r: 1.00
+  
+  be_plus:
+    enabled: false
+    trigger_r: 0.50
+    lock_r: 0.20
+    disallow_breakeven: true
+    min_r_before_lock: 0.50
+
+# --- SL/TP Defaults (ATR multipliers) ---
+sl_tp:
+  default_sl_atr: 1.0       # SL = 1.0 x ATR
+  default_tp_atr: 2.0       # TP = 2.0 x ATR (2:1 R:R)
+  tight_sl_atr: 0.8         # For high-confidence trades
+  wide_sl_atr: 1.5          # For volatile conditions
+  extended_tp_atr: 3.0      # For strong trend trades
+
+# --- Logging ---
+logging:
+  level: "INFO"             # DEBUG, INFO, WARNING, ERROR
+  log_signals: true         # Log all analyzed signals
+  log_decisions: true       # Log AI decisions
+  log_trades: true          # Log executed trades
+

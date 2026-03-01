@@ -1,0 +1,103 @@
+# Trader Engine Configuration
+master_engine:
+  name: "Rebel Trader Engine"
+  version: "1.0.0"
+  
+  # Trading settings
+  trading:
+    enabled: true
+    max_positions: 10
+    risk_per_trade: 1.0
+    max_daily_loss: 5.0
+  max_daily_trades: 45
+  
+  # Symbol settings
+  symbols:
+    - "EURUSD"
+    - "GBPUSD"
+    - "USDJPY"
+    - "AUDUSD"
+    - "USDCAD"
+    - "USDCHF"
+    - "NZDUSD"
+    - "EURGBP"
+    - "EURJPY"
+    - "GBPJPY"
+  
+  # Timeframe settings
+  timeframes:
+    - "M15"
+    - "H1"
+    - "H4"
+  primary_timeframe: "H1"
+  candle_count: 500
+  
+  # AI settings
+  ai:
+    market_brain:
+      enabled: true
+      model: "gpt-4.1"
+      temperature: 0.3
+    
+    ai_brain:
+      enabled: true
+      model: "gpt-4.1"
+      temperature: 0.5
+    
+    trade_brain:
+      enabled: true
+      model: "gpt-4.1"
+      temperature: 0.4
+  
+  # Indicator settings
+  indicators:
+    sma_periods: [20, 50, 100, 200]
+    ema_periods: [12, 26, 50]
+    rsi_period: 14
+    macd_fast: 12
+    macd_slow: 26
+    macd_signal: 9
+    atr_period: 14
+    bollinger_period: 20
+    bollinger_std: 2.0
+  
+  # Risk management
+  risk:
+    stop_loss_pips: 50
+    take_profit_pips: 100
+    trailing_stop: true
+    trailing_stop_pips: 30
+    max_drawdown: 20.0
+    risk_adjustment: true
+  
+  # Journaling
+  journal:
+    enabled: true
+    file_path: "logs/master_journal.json"
+    log_all_trades: true
+    log_signals: true
+    log_performance: true
+  
+  # Performance learning
+  performance:
+    enabled: true
+    learning_window: 30  # days
+    min_trades_for_learning: 10
+    adjust_parameters: true
+  
+  # Optimizer
+  optimizer:
+    enabled: true
+    optimize_indicators: true
+    optimize_risk: true
+    optimization_window: 100  # trades
+    rebalance_frequency: 7  # days
+  
+  # Dashboard settings
+  dashboard:
+    refresh_interval: 3
+    show_all_modules: true
+    show_journal: true
+    show_performance: true
+    show_optimizer: true
+

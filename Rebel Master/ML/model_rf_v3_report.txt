@@ -1,0 +1,61 @@
+============================================================
+  RANDOM FOREST v3 BETA - MODEL REPORT
+============================================================
+  Date: 2026-01-04 02:04:17
+  Dataset: C:\Rebel Technologies\Rebel Master\ML\training_dataset.csv
+  Training samples: 240
+  Test samples: 60
+  Features used: 15
+
+------------------------------------------------------------
+  HOLDOUT TEST SET PERFORMANCE
+------------------------------------------------------------
+  Accuracy:   0.6667 (66.7%)
+  Precision:  0.5714
+  Recall:     0.3636
+  F1 Score:   0.4444
+  ROC AUC:    0.7428
+
+------------------------------------------------------------
+  CONFUSION MATRIX
+------------------------------------------------------------
+                  Predicted
+                  Loss    Win
+  Actual Loss       32       6
+  Actual Win        14       8
+
+------------------------------------------------------------
+  TRADING METRICS
+------------------------------------------------------------
+  Trades predicted as WIN: 14
+  Actual wins from those:  8
+  Simulated win rate:      57.1%
+  Missed opportunities:    14 (wins predicted as loss)
+  Bad calls avoided:       32 (losses correctly skipped)
+
+------------------------------------------------------------
+  TOP 10 FEATURE IMPORTANCES
+------------------------------------------------------------
+  1. spread_ratio              0.1763
+  2. volatility_regime         0.0983
+  3. adx                       0.0952
+  4. macd_abs                  0.0852
+  5. rsi                       0.0740
+  6. minute                    0.0617
+  7. sl_distance               0.0540
+  8. atr_ratio                 0.0536
+  9. hour                      0.0489
+  10. ema_slow                  0.0488
+
+============================================================
+  Model saved to: C:\Rebel Technologies\Rebel Master\ML\model_rf_v3.joblib
+============================================================
+
+------------------------------------------------------------
+  CROSS-VALIDATION RESULTS (10-fold)
+------------------------------------------------------------
+  ACCURACY    : 0.6849 (+/- 0.1439)
+  PRECISION   : 0.5778 (+/- 0.2388)
+  RECALL      : 0.5973 (+/- 0.2548)
+  F1          : 0.5787 (+/- 0.1912)
+  ROC_AUC     : 0.7071 (+/- 0.1805)

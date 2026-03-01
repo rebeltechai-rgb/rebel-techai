@@ -1,0 +1,94 @@
+{
+  "timestamp": "2026-02-11T12:37:02.725356+00:00",
+  "lifetime": {
+    "total_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": 0.0,
+    "avg_rr": null,
+    "by_asset_class": {
+      "FX": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      },
+      "CRYPTO": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      },
+      "METALS": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      },
+      "INDICES": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      },
+      "ENERGIES": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      },
+      "SOFTS": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      }
+    }
+  },
+  "rolling_5_day": {
+    "total_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": 0.0,
+    "avg_rr": null,
+    "by_asset_class": {
+      "FX": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      },
+      "CRYPTO": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      },
+      "METALS": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      },
+      "INDICES": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      },
+      "ENERGIES": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      },
+      "SOFTS": {
+        "trades": 0,
+        "wins": 0,
+        "win_rate": 0.0,
+        "avg_rr": null
+      }
+    },
+    "window": "Sun 14:00 \u2192 Fri 14:00"
+  }
+}

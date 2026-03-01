@@ -1,0 +1,25 @@
+groups:
+  majors:
+    - EURUSD
+    - GBPUSD
+    - USDJPY
+    - AUDUSD
+    - USDCAD
+    - USDCHF
+    - NZDUSD
+
+  metals:
+    - XAUUSD
+    - XAGUSD
+
+  crypto:
+    - BTCUSD
+    - ETHUSD
+    - SOL-USD
+    - AVAX-USD
+    - BNB-USD
+    - ADAUSD
+    - XRPUSD
+    - LTCUSD
+    - DOTUSD
+    - BCHUSD

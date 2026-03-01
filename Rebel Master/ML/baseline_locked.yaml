@@ -1,0 +1,15 @@
+name: rebel_baseline_locked_v4
+dataset: C:\Rebel Technologies\Rebel Master\ML\training_dataset.csv
+rules:
+  spread_tight: "< 0.040"
+  rr_decent: ">= 1.2"
+  rsi_ok: "20 < rsi < 80"
+  ema_trend_buy: "ema_fast > ema_slow"
+  ema_trend_sell: "ema_fast < ema_slow"
+notes:
+  description: "Locked baseline from v4 run with strong OOS performance."
+  last_run_metrics:
+    trades: 87
+    oos_win_rate: 0.699
+    oos_profit_factor: 2.96
+    oos_net_r: 11.00

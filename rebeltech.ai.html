@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rebel Tech AI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0b0c;
+        --panel: #141416;
+        --text: #e8e8ea;
+        --muted: #b0b0b5;
+        --red: #e23b3b;
+        --blue: #2f6bff;
+        --border: #232327;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Inter", system-ui, -apple-system, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 64px 24px 96px;
+      }
+
+      header {
+        text-align: center;
+        margin-bottom: 48px;
+      }
+
+      .logo {
+        font-family: "Orbitron", sans-serif;
+        font-size: clamp(3rem, 8vw, 6.5rem);
+        font-weight: 800;
+        letter-spacing: 2px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        line-height: 1.05;
+      }
+
+      .logo span {
+        display: inline-block;
+      }
+
+      .logo .rebel {
+        color: var(--red);
+      }
+
+      .logo .tech {
+        color: var(--blue);
+      }
+
+      .logo .ai {
+        color: var(--text);
+      }
+
+      .tagline {
+        margin-top: 16px;
+        color: var(--muted);
+        font-size: 1.1rem;
+      }
+
+      .sections {
+        display: grid;
+        gap: 32px;
+      }
+
+      section {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 28px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: clamp(2rem, 4vw, 3.2rem);
+      }
+
+      h2 {
+        margin: 0 0 16px;
+        font-size: 1.4rem;
+      }
+
+      p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--muted);
+        line-height: 1.8;
+      }
+
+      .grid-2 {
+        display: grid;
+        gap: 24px;
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px;
+        background: #101012;
+      }
+
+      .card h3 {
+        margin: 0 0 10px;
+        font-size: 1.2rem;
+      }
+
+      .price {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        border: 1px solid var(--border);
+        color: var(--muted);
+      }
+
+      .buttons {
+        display: grid;
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .hero {
+        text-align: center;
+        padding: 36px 32px;
+      }
+
+      .vision-strip {
+        text-align: center;
+      }
+
+      button {
+        padding: 12px 16px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #1a1a1f;
+        color: var(--text);
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button[disabled] {
+        opacity: 0.7;
+        cursor: not-allowed;
+      }
+
+      .note {
+        font-size: 0.95rem;
+        color: var(--muted);
+      }
+
+      @media (min-width: 880px) {
+        .grid-2 {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="logo">
+          <span class="rebel">REBEL</span>
+          <span class="tech">TECH</span>
+          <span class="ai">AI</span>
+          <span aria-hidden="true">🛡️</span>
+        </div>
+        <div class="tagline">Rebel Tech AI</div>
+      </header>
+
+      <div class="sections">
+        <section class="hero">
+          <h1>Helping you trade your edge</h1>
+          <p>
+            Rule-based market scanners designed to reduce noise, surface
+            high-quality opportunities, and support disciplined trading
+            decisions.
+          </p>
+          <div class="buttons">
+            <button type="button">View Rebel Lite Scanner</button>
+            <button type="button">View Rebel Intelligent Scanner</button>
+          </div>
+        </section>
+
+        <section class="vision-strip">
+          <h2>Building a complete trading ecosystem</h2>
+          <p>🚧 Rebel Master — AI Trading System (Coming Soon)</p>
+          <p>🚧 Rebel Trader — Execution Engine (Coming Soon)</p>
+          <p>
+            Our scanners are the foundation of a broader, risk-first trading
+            framework currently in development.
+          </p>
+        </section>
+
+        <section>
+          <h2>What we build</h2>
+          <p>Most traders don’t need more signals.</p>
+          <p>They need better filtering.</p>
+          <p>
+            Rebel Tech AI tools are built around one principle: structure first,
+            execution second.
+          </p>
+          <p>Our scanners help you focus on:</p>
+          <ul>
+            <li>Markets worth attention</li>
+            <li>Conditions aligned with your strategy</li>
+            <li>Fewer, higher-quality opportunities</li>
+          </ul>
+          <p>No signal flooding. No hype. No shortcuts.</p>
+        </section>
+
+        <section>
+          <h2>Products</h2>
+          <div class="grid-2">
+            <div class="card">
+              <h3>Rebel Intelligent Scanner Lite</h3>
+              <p>For traders who want clarity without overload.</p>
+              <p>
+                Rebel Lite is designed to surface structured setups while
+                intentionally limiting noise.
+              </p>
+              <p><strong>Key features</strong></p>
+              <ul>
+                <li>Curated market scans</li>
+                <li>Reduced signal frequency by design</li>
+                <li>Beginner-friendly structure</li>
+                <li>Ideal for discretionary traders</li>
+              </ul>
+              <div class="buttons">
+                <button type="button">Get Rebel Lite</button>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Rebel Intelligent Scanner</h3>
+              <p>Expanded coverage for serious traders.</p>
+              <p>
+                The full scanner provides deeper filtering and broader market
+                visibility while maintaining disciplined signal logic.
+              </p>
+              <p><strong>Key features</strong></p>
+              <ul>
+                <li>More symbols and asset coverage</li>
+                <li>Advanced filtering logic</li>
+                <li>Faster opportunity discovery</li>
+                <li>Built for active and experienced traders</li>
+              </ul>
+              <div class="buttons">
+                <button type="button">Get Rebel Intelligent Scanner</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Why Rebel Tech AI</h2>
+          <p>Rebel Tech AI is built by a system designer — not a marketer.</p>
+          <p>Every product follows the same philosophy:</p>
+          <ul>
+            <li>Risk control before opportunity</li>
+            <li>Rules before emotion</li>
+            <li>Fewer decisions, better decisions</li>
+          </ul>
+          <p>
+            Our scanners are not signal services. They are decision-support
+            tools built to respect the trader’s edge.
+          </p>
+        </section>
+
+        <section>
+          <h2>Who this is for (and who it isn’t)</h2>
+          <div class="grid-2">
+            <div class="card">
+              <h3>These scanners are for you if:</h3>
+              <ul>
+                <li>You trade discretionary or semi-systematic strategies</li>
+                <li>You value structure and discipline</li>
+                <li>You want help finding opportunities — not instructions</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>These scanners are NOT for you if:</h3>
+              <ul>
+                <li>You want buy/sell signals</li>
+                <li>You expect guaranteed profits</li>
+                <li>You don’t manage risk</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Looking ahead</h2>
+          <p>
+            The scanners you see today are the groundwork for what’s coming
+            next.
+          </p>
+          <p>
+            Rebel Master and Rebel Trader are currently in development and will
+            integrate directly with this ecosystem — built on the same risk-first
+            principles.
+          </p>
+          <p>
+            Early users of Rebel scanners will already understand the logic when
+            the full system arrives.
+          </p>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

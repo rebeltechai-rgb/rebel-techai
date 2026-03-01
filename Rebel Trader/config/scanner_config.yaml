@@ -1,0 +1,61 @@
+# Scanner Engine Configuration
+# Uses same MT5 account as Rebel Trader
+scanner:
+  name: "REBEL Scanner"
+  version: "1.0.0"
+  
+  # Symbol settings - independent of other projects
+  symbols:
+    # FX Majors
+    - EURUSD
+    - GBPUSD
+    - USDJPY
+    - AUDUSD
+    - NZDUSD
+    - USDCAD
+    - USDCHF
+    # FX Crosses
+    - EURJPY
+    - GBPJPY
+    - EURGBP
+    - AUDJPY
+    - EURAUD
+    # Metals
+    - XAUUSD
+    - XAGUSD
+    # Indices
+    - US500
+    - US30
+    - USTECH
+    - GER40
+    - UK100
+    # Crypto
+    - BTCUSD
+    - ETHUSD
+    # Energies
+    - USOIL
+    - NATGAS.fs
+  
+  # Timeframe settings
+  timeframe: "M15"  # 15-minute candles
+  candle_count: 100
+  
+  # AI settings
+  ai:
+    enabled: true
+    model: "gpt-4.1-mini"
+    commentary_length: "short"
+  
+  # Dashboard settings
+  dashboard:
+    refresh_interval: 5  # seconds
+    show_sparklines: true
+    show_heatmaps: true
+    show_top_signals: 3
+  
+  # Output settings
+  output:
+    format: "detailed"
+    show_ai_commentary: true
+    show_patterns: true
+    show_risk: true

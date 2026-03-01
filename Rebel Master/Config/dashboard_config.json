@@ -1,0 +1,8 @@
+{
+    "auto_trade": true,
+    "strategy_mode": "normal",
+    "min_score": 3,
+    "timeframe": "M15",
+    "add_symbols": [],
+    "kill_switch": false
+}

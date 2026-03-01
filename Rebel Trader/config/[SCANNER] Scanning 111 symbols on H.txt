@@ -1,0 +1,29 @@
+[SCANNER] Scanning 111 symbols on H1...
+[SCANNER] Skipping 17 symbols (never passed filters)
+[SCANNER] Signal: USDBRL -> SHORT (score: 4/5)
+
+[SCANNER] Scan complete. Found 1 signals.
+[ENGINE] Found 1 signal(s)
+[FILTER] USDBRL: REJECTED by TREND_ALIGNMENT — htf_flat_no_direction
+[FILTER] USDBRL: BLOCKED - ['G1_TREND:htf_flat_no_direction']
+[FILTER] USDBRL: BLOCKED - ['G1_TREND:htf_flat_no_direction']
+[ENGINE] Next scan in 60s...
+
+[ENGINE] Scan #222 at 2026-02-08 17:57:45
+[POSITION MGR] MT5 not ready - skipping sync/update
+[ENGINE] Total trades closed: 1272 | Lifetime P/L: -988.85122 pts
+[MT5] Connection attempt 1/5...
+[MT5] Initializing with terminal: C:/Master Pro/terminal64.exe
+[MT5] Connected successfully on attempt 1
+[MT5] Account: 10020166 | Balance: 3663.71
+[MT5] Server: Axi-US50-Demo
+[SCANNER] Scanning 111 symbols on H1...
+[SCANNER] Skipping 17 symbols (never passed filters)
+[SCANNER] Signal: USDBRL -> SHORT (score: 4/5)
+
+[SCANNER] Scan complete. Found 1 signals.
+[ENGINE] Found 1 signal(s)
+[FILTER] USDBRL: REJECTED by TREND_ALIGNMENT — htf_flat_no_direction
+[FILTER] USDBRL: BLOCKED - ['G1_TREND:htf_flat_no_direction']
+[FILTER] USDBRL: BLOCKED - ['G1_TREND:htf_flat_no_direction']
+[ENGINE] Next scan in 60s...

@@ -1,0 +1,1073 @@
+"""
+REBEL Intelligent Scanner - Standalone AI-Driven Market Scanner
+================================================================
+A complete standalone scanner with:
+  - Direct MT5 connection (no broker abstraction needed)
+  - Multi-timeframe technical analysis
+  - AI-powered signal reasoning (OpenAI GPT)
+  - Adaptive confidence thresholds
+  - Continuous scanning loop with configurable interval
+  - Entry, SL, TP calculation
+  - Console and file logging
+"""
+
+import os
+import sys
+import json
+import time
+import math
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple
+
+import yaml
+import numpy as np
+import pandas as pd
+
+import MetaTrader5 as mt5
+
+# === DEDICATED SCANNER TERMINAL (PRE-OPENED) ===
+SCANNER_MT5_PATH = r"C:\mt5_scanner_live\terminal64.exe"  # Change if your folder path is different
+SCANNER_PREATTACHED = False
+
+def safe_attach_to_scanner():
+    global SCANNER_PREATTACHED
+    for attempt in range(5):
+        try:
+            # Shutdown any stray connection first
+            mt5.shutdown()
+            
+            # ATTACH ONLY - no login, no password, no server (uses the pre-logged terminal)
+            if mt5.initialize(path=SCANNER_MT5_PATH):
+                account_info = mt5.account_info()
+                if account_info is not None:
+                    print(f"[SCANNER] Attached to pre-opened terminal {SCANNER_MT5_PATH} - Account {account_info.login}")
+                    SCANNER_PREATTACHED = True
+                    return True
+                else:
+                    print(f"[SCANNER] Attached but no account info - ensure terminal is open and logged in (attempt {attempt+1})")
+            else:
+                print(f"[SCANNER] Attach failed (attempt {attempt+1}): {mt5.last_error()}")
+        except Exception as e:
+            print(f"[SCANNER] Error: {e} - retry {attempt+1}/5...")
+        time.sleep(5)
+    
+    print("[SCANNER] Failed to attach after 5 attempts. Make sure C:\mt5_scanner_live\terminal64.exe is open and logged in to any account.")
+    return False
+
+# Replace the old mt5.initialize() block with this
+if not safe_attach_to_scanner():
+    print("[SCANNER] Connection failed - aborting. Open the scanner terminal manually first and log in.")
+    exit(1)
+
+print("[SCANNER] Ready - scanning data from pre-logged terminal")
+
+# Optional OpenAI for AI mode
+HAS_OPENAI = False
+openai = None
+try:
+    import openai as _openai
+    openai = _openai
+    HAS_OPENAI = True
+except ImportError:
+    pass
+
+# ============================================================================
+#   CONFIGURATION PATHS
+# ============================================================================
+
+MASTER_CONFIG_PATH = r"C:\Rebel Technologies\Rebel Master\Config\master_config.yaml"
+SYMBOL_LIST_PATH = r"C:\Rebel Technologies\Rebel Master\Config\symbol_lists.yaml"
+LOG_PATH = r"C:\Rebel Technologies\Rebel Master\logs\intelligent_scanner.log"
+
+
+# ============================================================================
+#   TECHNICAL ANALYSIS UTILITIES
+# ============================================================================
+
+def compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    """Wilder-style RSI calculation."""
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    rsi_val = 100 - (100 / (1 + rs))
+    return rsi_val
+
+
+def compute_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Average True Range (ATR)."""
+    high = df["high"]
+    low = df["low"]
+    close = df["close"]
+
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        (high - low),
+        (high - prev_close).abs(),
+        (low - prev_close).abs()
+    ], axis=1).max(axis=1)
+
+    atr_val = tr.rolling(window=period, min_periods=period).mean()
+    return atr_val
+
+
+def compute_ema(series: pd.Series, period: int) -> pd.Series:
+    """Exponential Moving Average."""
+    return series.ewm(span=period, adjust=False).mean()
+
+
+def compute_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Dict[str, pd.Series]:
+    """MACD indicator."""
+    ema_fast = series.ewm(span=fast, adjust=False).mean()
+    ema_slow = series.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    histogram = macd_line - signal_line
+    return {"macd": macd_line, "signal": signal_line, "histogram": histogram}
+
+
+def compute_bollinger(series: pd.Series, period: int = 20, std_dev: float = 2.0) -> Dict[str, pd.Series]:
+    """Bollinger Bands."""
+    sma = series.rolling(window=period).mean()
+    std = series.rolling(window=period).std()
+    upper = sma + (std * std_dev)
+    lower = sma - (std * std_dev)
+    return {"upper": upper, "middle": sma, "lower": lower}
+
+
+def compute_slope(series: pd.Series, length: int = 10) -> float:
+    """Linear regression slope over last N points."""
+    if len(series) < length:
+        return 0.0
+    y = series.iloc[-length:].values
+    x = np.arange(len(y))
+    A = np.vstack([x, np.ones(len(x))]).T
+    result = np.linalg.lstsq(A, y, rcond=None)
+    m = result[0][0]
+    return float(m)
+
+
+def compute_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> Dict[str, pd.Series]:
+    """Stochastic Oscillator."""
+    low_min = df["low"].rolling(window=k_period).min()
+    high_max = df["high"].rolling(window=k_period).max()
+    k = 100 * (df["close"] - low_min) / (high_max - low_min + 1e-10)
+    d = k.rolling(window=d_period).mean()
+    return {"k": k, "d": d}
+
+
+# ============================================================================
+#   TIMEFRAME MAPPING
+# ============================================================================
+
+TF_MAP = {
+    "M1": mt5.TIMEFRAME_M1,
+    "M5": mt5.TIMEFRAME_M5,
+    "M15": mt5.TIMEFRAME_M15,
+    "M30": mt5.TIMEFRAME_M30,
+    "H1": mt5.TIMEFRAME_H1,
+    "H4": mt5.TIMEFRAME_H4,
+    "D1": mt5.TIMEFRAME_D1,
+    "W1": mt5.TIMEFRAME_W1,
+}
+
+
+# ============================================================================
+#   REBEL INTELLIGENT SCANNER CLASS
+# ============================================================================
+
+class RebelIntelligentScanner:
+    """
+    Standalone AI-driven market scanner with:
+      - Multi-timeframe technical analysis
+      - Adaptive confidence thresholds
+      - Optional AI reasoning layer (GPT)
+      - Entry/SL/TP calculation
+    """
+
+    def __init__(self, config: Dict[str, Any] = None):
+        self.config = config or {}
+        self.connected = False
+
+        # Scanner settings from config
+        is_cfg = self.config.get("intelligent_scanner", {})
+        
+        self.enabled: bool = is_cfg.get("enabled", True)
+        self.timeframes: List[str] = is_cfg.get("timeframes", ["M5", "M15", "H1"])
+        self.bars: int = is_cfg.get("bars", 400)
+        self.scan_interval: int = is_cfg.get("scan_interval", 300)  # 5 minutes default
+
+        # Confidence & mode
+        self.base_min_confidence: int = is_cfg.get("min_confidence", 55)
+        self.mode: str = is_cfg.get("mode", "hybrid")  # ta_only | ai_only | hybrid
+
+        # Risk settings
+        self.risk_percent: float = is_cfg.get("risk_percent", 2.0)
+        self.sl_atr_multiplier: float = is_cfg.get("sl_atr_multiplier", 2.0)
+        self.tp_atr_multiplier: float = is_cfg.get("tp_atr_multiplier", 3.0)
+
+        # AI settings
+        self.use_ai: bool = is_cfg.get("use_ai", False)
+        self.ai_model: str = is_cfg.get("ai_model", "gpt-4o-mini")
+        self.ai_max_tokens: int = is_cfg.get("ai_max_tokens", 512)
+
+        # Load API key from scanner config, then master AI config, then environment
+        ai_cfg = self.config.get("ai", {}) or {}
+        api_key = (
+            is_cfg.get("openai_api_key")
+            or ai_cfg.get("openai_api_key")
+            or os.environ.get("OPENAI_API_KEY")
+        )
+        api_key = api_key.strip() if isinstance(api_key, str) else api_key
+        source = "none"
+        if is_cfg.get("openai_api_key"):
+            source = "intelligent_scanner"
+        elif ai_cfg.get("openai_api_key"):
+            source = "ai"
+        elif os.environ.get("OPENAI_API_KEY"):
+            source = "env"
+
+        self.api_key_source = source
+        self.api_key_masked = None
+
+        if api_key and HAS_OPENAI and openai:
+            openai.api_key = api_key
+            masked = f"...{api_key[-4:]}" if len(api_key) >= 4 else "***"
+            self.api_key_masked = masked
+            print(f"[AI] OpenAI API key configured (source={source}, key={masked})")
+        elif self.use_ai:
+            present = "yes" if api_key else "no"
+            print(f"[AI] Key present={present} | source={source} | OpenAI loaded={HAS_OPENAI}")
+        elif self.use_ai:
+            print("[AI] Warning: use_ai=True but OpenAI not available or no API key")
+            self.use_ai = False
+
+        # Symbols
+        self.symbols: List[str] = []
+        
+        # Stats tracking
+        self.scan_count = 0
+        self.signal_count = 0
+
+    # ========================================================================
+    #   MT5 CONNECTION
+    # ========================================================================
+
+    def connect(self) -> bool:
+        """Initialize MT5 connection."""
+        if self.connected:
+            return True
+        # If we already attached to a dedicated scanner terminal, keep that session.
+        if SCANNER_PREATTACHED and mt5.account_info() is not None:
+            self.connected = True
+            return True
+
+        if not mt5.initialize():
+            print(f"[MT5] Failed to initialize: {mt5.last_error()}")
+            return False
+
+        # Optional login from config
+        mt5_cfg = self.config.get("mt5", {})
+        login = mt5_cfg.get("login")
+        password = mt5_cfg.get("password")
+        server = mt5_cfg.get("server")
+
+        if login and password and server:
+            if not mt5.login(login=login, password=password, server=server):
+                print(f"[MT5] Login failed: {mt5.last_error()}")
+                return False
+
+        account = mt5.account_info()
+        if account:
+            print(f"[MT5] Connected: {account.login} @ {account.server}")
+            print(f"[MT5] Balance: {account.balance:.2f} {account.currency}")
+        
+        self.connected = True
+        return True
+
+    def disconnect(self):
+        """Shutdown MT5 connection."""
+        if self.connected:
+            mt5.shutdown()
+            self.connected = False
+            print("[MT5] Disconnected")
+
+    # ========================================================================
+    #   SYMBOL MANAGEMENT
+    # ========================================================================
+
+    def _normalize_symbol(self, name: str) -> str:
+        return "".join(ch for ch in name.lower() if ch.isalnum())
+
+    def _resolve_symbol(self, config_symbol: str, all_mt5_symbols: list) -> Optional[str]:
+        """Resolve config symbol to broker symbol (handles suffixes like .a, .m, .fs)."""
+        sym_map = {self._normalize_symbol(s.name): s.name for s in all_mt5_symbols}
+        base = self._normalize_symbol(config_symbol)
+        
+        # Exact match
+        if base in sym_map:
+            return sym_map[base]
+        
+        # Find matches with suffixes, prefer non-.sa (standard over Select)
+        matches = [s.name for s in all_mt5_symbols if self._normalize_symbol(s.name).startswith(base)]
+        if not matches:
+            return None
+        
+        # Prefer standard account symbols (not .sa)
+        standard = [m for m in matches if not m.lower().endswith('.sa')]
+        return min(standard, key=len) if standard else matches[0]
+
+    def load_symbols(self) -> List[str]:
+        """Load symbols from configuration and resolve to broker format."""
+        config_symbols = []
+
+        # Try master config first
+        cfg_symbols = self.config.get("symbols", {})
+        groups = cfg_symbols.get("groups", {})
+
+        for group_name, group_cfg in groups.items():
+            if isinstance(group_cfg, dict):
+                if not group_cfg.get("enabled", True):
+                    continue
+                group_symbols = group_cfg.get("symbols", [])
+            elif isinstance(group_cfg, list):
+                group_symbols = group_cfg
+            else:
+                continue
+
+            if isinstance(group_symbols, list):
+                config_symbols.extend(group_symbols)
+
+        # Fallback to symbol_lists.yaml
+        if not config_symbols and os.path.exists(SYMBOL_LIST_PATH):
+            with open(SYMBOL_LIST_PATH, "r") as f:
+                data = yaml.safe_load(f) or {}
+            groups = data.get("groups", {})
+            for _, lst in groups.items():
+                if isinstance(lst, list):
+                    config_symbols.extend(lst)
+
+        # Remove duplicates
+        config_symbols = list(dict.fromkeys(config_symbols))
+
+        # Resolve to broker symbols
+        all_mt5 = mt5.symbols_get()
+        if all_mt5:
+            self.symbols = []
+            for sym in config_symbols:
+                resolved = self._resolve_symbol(sym, all_mt5)
+                if resolved:
+                    self.symbols.append(resolved)
+            print(f"[SCANNER] Resolved {len(self.symbols)} symbols to broker format")
+            if not self.symbols and config_symbols:
+                self.symbols = config_symbols
+                print("[SCANNER] Warning: resolution returned 0 symbols; using config symbols as-is")
+        else:
+            self.symbols = config_symbols
+            
+        return self.symbols
+
+    def ensure_symbol(self, symbol: str) -> bool:
+        """Ensure symbol is available in MT5."""
+        if not mt5.symbol_select(symbol, True):
+            return False
+        info = mt5.symbol_info(symbol)
+        return info is not None and info.visible
+
+    # ========================================================================
+    #   DATA FETCHING
+    # ========================================================================
+
+    def get_historical_data(self, symbol: str, timeframe: str, bars: int = 400) -> Optional[pd.DataFrame]:
+        """Fetch historical OHLC data from MT5."""
+        tf = TF_MAP.get(timeframe.upper(), mt5.TIMEFRAME_H1)
+        
+        rates = mt5.copy_rates_from_pos(symbol, tf, 0, bars)
+        if rates is None or len(rates) == 0:
+            return None
+
+        df = pd.DataFrame(rates)
+        df["time"] = pd.to_datetime(df["time"], unit="s")
+        return df
+
+    def _fetch_mtf_data(self, symbol: str) -> Dict[str, pd.DataFrame]:
+        """Fetch data for all configured timeframes."""
+        data = {}
+        for tf in self.timeframes:
+            df = self.get_historical_data(symbol, tf, self.bars)
+            if df is not None and not df.empty:
+                data[tf] = df
+        return data
+
+    def get_current_price(self, symbol: str) -> Optional[Dict[str, float]]:
+        """Get current bid/ask price."""
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return None
+        return {"bid": tick.bid, "ask": tick.ask, "last": tick.last}
+
+    # ========================================================================
+    #   TECHNICAL ANALYSIS
+    # ========================================================================
+
+    def _analyze_trend_mtf(self, mtf_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        """Multi-timeframe trend analysis."""
+        per_tf = {}
+        votes = 0
+
+        for tf, df in mtf_data.items():
+            close = df["close"]
+            ema20 = compute_ema(close, 20)
+            ema50 = compute_ema(close, 50)
+
+            if len(ema20) < 60 or len(ema50) < 60:
+                continue
+
+            ema20_last = float(ema20.iloc[-1])
+            ema50_last = float(ema50.iloc[-1])
+            ema50_slope = compute_slope(ema50, length=40)
+
+            if ema20_last > ema50_last and ema50_slope > 0:
+                per_tf[tf] = "uptrend"
+                votes += 1
+            elif ema20_last < ema50_last and ema50_slope < 0:
+                per_tf[tf] = "downtrend"
+                votes -= 1
+            else:
+                per_tf[tf] = "sideways"
+
+        if votes >= 2:
+            overall = "strong_up"
+            trend_score = 25
+        elif votes == 1:
+            overall = "weak_up"
+            trend_score = 15
+        elif votes == 0:
+            overall = "sideways"
+            trend_score = 5
+        elif votes == -1:
+            overall = "weak_down"
+            trend_score = 15
+        else:
+            overall = "strong_down"
+            trend_score = 25
+
+        return {"per_tf": per_tf, "overall": overall, "trend_score": trend_score}
+
+    def _analyze_momentum(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """RSI and MACD momentum analysis."""
+        rsi_series = compute_rsi(df["close"], 14)
+        rsi_last = float(rsi_series.iloc[-1]) if not rsi_series.empty else 50
+
+        macd_data = compute_macd(df["close"])
+        macd_hist = float(macd_data["histogram"].iloc[-1]) if not macd_data["histogram"].empty else 0
+
+        # Stochastic
+        stoch = compute_stochastic(df)
+        stoch_k = float(stoch["k"].iloc[-1]) if not stoch["k"].empty else 50
+
+        if rsi_last >= 65:
+            mood = "overbought_bullish"
+            score = 15
+        elif rsi_last >= 55:
+            mood = "bullish"
+            score = 12
+        elif rsi_last <= 35:
+            mood = "oversold_bearish"
+            score = 15
+        elif rsi_last <= 45:
+            mood = "bearish"
+            score = 12
+        else:
+            mood = "neutral"
+            score = 5
+
+        # Adjust score based on MACD confirmation
+        if (mood == "bullish" or mood == "overbought_bullish") and macd_hist > 0:
+            score += 3
+        elif (mood == "bearish" or mood == "oversold_bearish") and macd_hist < 0:
+            score += 3
+
+        return {
+            "rsi": round(rsi_last, 2),
+            "macd_histogram": round(macd_hist, 6),
+            "stochastic_k": round(stoch_k, 2),
+            "mood": mood,
+            "momentum_score": min(score, 20)
+        }
+
+    def _analyze_volatility(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """ATR-based volatility regime analysis."""
+        atr_series = compute_atr(df, 14)
+        last = float(atr_series.iloc[-1]) if not atr_series.empty else 0
+        median = float(atr_series.median()) if not atr_series.empty else 0
+
+        if median == 0 or np.isnan(median):
+            regime = "normal"
+            score = 5
+        else:
+            ratio = last / median
+            if ratio > 1.6:
+                regime = "expanding"
+                score = 12
+            elif ratio < 0.7:
+                regime = "contracting"
+                score = 3
+            else:
+                regime = "normal"
+                score = 7
+
+        return {
+            "atr": round(last, 6),
+            "atr_median": round(median, 6),
+            "regime": regime,
+            "volatility_score": score
+        }
+
+    def _analyze_structure(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Price structure analysis (breakout/range/pullback zones)."""
+        close = df["close"]
+        high_n = close.rolling(window=50, min_periods=20).max()
+        low_n = close.rolling(window=50, min_periods=20).min()
+
+        last_close = float(close.iloc[-1])
+        last_high = float(high_n.iloc[-1])
+        last_low = float(low_n.iloc[-1])
+
+        if np.isnan(last_high) or np.isnan(last_low):
+            return {"bias": "unknown", "structure_score": 5}
+
+        span = last_high - last_low
+        if span <= 0:
+            return {"bias": "unknown", "structure_score": 5}
+
+        pos = (last_close - last_low) / span
+
+        # Bollinger position
+        bb = compute_bollinger(close)
+        bb_upper = float(bb["upper"].iloc[-1])
+        bb_lower = float(bb["lower"].iloc[-1])
+        bb_position = "middle"
+        if last_close > bb_upper:
+            bb_position = "above_upper"
+        elif last_close < bb_lower:
+            bb_position = "below_lower"
+
+        if pos >= 0.8:
+            bias = "near_high_breakout_zone"
+            score = 12
+        elif pos <= 0.2:
+            bias = "near_low_breakdown_zone"
+            score = 12
+        elif 0.4 <= pos <= 0.6:
+            bias = "mid_range_chop"
+            score = 5
+        else:
+            bias = "pullback_zone"
+            score = 8
+
+        return {
+            "bias": bias,
+            "position_in_range": round(pos, 2),
+            "bollinger_position": bb_position,
+            "structure_score": score
+        }
+
+    # ========================================================================
+    #   ADAPTIVE CONFIDENCE
+    # ========================================================================
+
+    def _adaptive_min_confidence(self, trend_overall: str, vol_regime: str) -> int:
+        """Adjust min confidence based on market conditions."""
+        base = self.base_min_confidence
+        delta = 0
+
+        if trend_overall in ("strong_up", "strong_down"):
+            if vol_regime in ("normal", "expanding"):
+                delta -= 5
+        if trend_overall == "sideways" and vol_regime == "expanding":
+            delta += 10
+        if vol_regime == "contracting":
+            delta -= 5
+
+        return max(30, min(85, base + delta))
+
+    def _build_direction_and_confidence(
+        self,
+        trend_overall: str,
+        momentum_mood: str,
+        structure_bias: str,
+        scores: Dict[str, int]
+    ) -> Dict[str, Any]:
+        """Combine component scores into direction and confidence."""
+        trend_score = scores.get("trend_score", 0)
+        momentum_score = scores.get("momentum_score", 0)
+        volatility_score = scores.get("volatility_score", 0)
+        structure_score = scores.get("structure_score", 0)
+
+        raw_total = trend_score + momentum_score + volatility_score + structure_score
+        # Max theoretical around 25 + 20 + 12 + 12 = 69 -> scale to 0-100
+        base_confidence = int(np.clip((raw_total / 69) * 100, 0, 100))
+
+        direction = None
+
+        if trend_overall in ("strong_up", "weak_up"):
+            if "bearish" not in momentum_mood:
+                direction = "long"
+        elif trend_overall in ("strong_down", "weak_down"):
+            if "bullish" not in momentum_mood:
+                direction = "short"
+        else:
+            # Sideways: only trade extremes
+            if structure_bias == "near_high_breakout_zone" and "bullish" in momentum_mood:
+                direction = "long"
+            elif structure_bias == "near_low_breakdown_zone" and "bearish" in momentum_mood:
+                direction = "short"
+
+        return {"direction": direction, "base_confidence": base_confidence}
+
+    # ========================================================================
+    #   AI REASONING LAYER
+    # ========================================================================
+
+    def _ai_analyze(self, symbol: str, tf_main: str, tech_summary: Dict[str, Any]) -> Dict[str, Any]:
+        """AI-powered analysis using GPT."""
+        if not self.use_ai or not HAS_OPENAI or openai is None or not openai.api_key:
+            return {"ai_confidence": None, "direction_override": None, "reasoning": []}
+
+        try:
+            prompt = f"""You are REBEL INTELLIGENT SCANNER, an expert FX/CFD trading analyst.
+
+Analyze this trading setup and provide your assessment:
+
+Symbol: {symbol}
+Timeframe: {tf_main}
+
+Technical Analysis Summary:
+{json.dumps(tech_summary, indent=2)}
+
+Based on this data, provide your analysis as JSON with these exact fields:
+{{
+  "direction": "long" | "short" | "none",
+  "ai_confidence": <integer 0-100>,
+  "reasoning": ["bullet point 1", "bullet point 2", ...],
+  "key_levels": {{"support": <price>, "resistance": <price>}},
+  "risk_assessment": "low" | "medium" | "high"
+}}
+
+Be conservative. Only recommend trades with clear setups. Consider:
+- Trend alignment across timeframes
+- Momentum confirmation
+- Volatility conditions
+- Price structure
+
+Respond ONLY with valid JSON, no markdown or explanation."""
+
+            response = openai.chat.completions.create(
+                model=self.ai_model,
+                messages=[
+                    {"role": "system", "content": "You are a professional trading analyst. Respond only with valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=self.ai_max_tokens,
+                temperature=0.1,
+            )
+
+            content = response.choices[0].message.content.strip()
+            # Clean potential markdown wrapping
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+            
+            data = json.loads(content)
+
+            return {
+                "ai_confidence": int(data.get("ai_confidence", 0)),
+                "direction_override": data.get("direction") if data.get("direction") in ("long", "short") else None,
+                "reasoning": data.get("reasoning", []),
+                "key_levels": data.get("key_levels", {}),
+                "risk_assessment": data.get("risk_assessment", "medium")
+            }
+
+        except Exception as e:
+            return {
+                "ai_confidence": None,
+                "direction_override": None,
+                "reasoning": [f"AI analysis error: {str(e)}"],
+                "key_levels": {},
+                "risk_assessment": "unknown"
+            }
+
+    # ========================================================================
+    #   LOT SIZE CALCULATION
+    # ========================================================================
+
+    def _calc_lot(self, symbol: str, entry_price: float, sl_price: float) -> float:
+        """Calculate lot size based on risk percentage and stop loss distance."""
+        account = mt5.account_info()
+        if account is None:
+            raise RuntimeError("Failed to get account info from MT5")
+
+        symbol_info = mt5.symbol_info(symbol)
+        if symbol_info is None:
+            raise RuntimeError(f"Symbol info not found for {symbol}")
+
+        # Risk amount in money
+        risk_amount = account.balance * (self.risk_percent / 100.0)
+
+        # Stop loss distance in price
+        sl_distance = abs(entry_price - sl_price)
+        if sl_distance <= 0:
+            raise ValueError("SL distance must be greater than zero")
+
+        # Convert SL distance into number of ticks
+        tick_size = symbol_info.trade_tick_size
+        tick_value = symbol_info.trade_tick_value
+        if tick_size <= 0 or tick_value <= 0:
+            raise RuntimeError(f"Invalid tick settings for {symbol}")
+
+        ticks = sl_distance / tick_size
+        loss_per_lot = ticks * tick_value
+
+        if loss_per_lot <= 0:
+            raise RuntimeError(f"Invalid loss_per_lot for {symbol}")
+
+        lot = risk_amount / loss_per_lot
+
+        # Normalize to broker constraints
+        vol_min = symbol_info.volume_min
+        vol_max = symbol_info.volume_max
+        vol_step = symbol_info.volume_step
+        if vol_step <= 0:
+            vol_step = 0.01
+
+        lot = round(lot / vol_step) * vol_step
+        lot = max(vol_min, min(vol_max, lot))
+
+        return lot
+
+    # ========================================================================
+    #   ENTRY/SL/TP CALCULATION
+    # ========================================================================
+
+    def _calculate_trade_levels(self, symbol: str, direction: str, atr: float) -> Dict[str, float]:
+        """Calculate entry, SL, and TP levels."""
+        price_data = self.get_current_price(symbol)
+        if not price_data:
+            return {}
+
+        symbol_info = mt5.symbol_info(symbol)
+        if not symbol_info:
+            return {}
+
+        digits = symbol_info.digits
+
+        if direction == "long":
+            entry = price_data["ask"]
+            sl = entry - (atr * self.sl_atr_multiplier)
+            tp = entry + (atr * self.tp_atr_multiplier)
+        else:  # short
+            entry = price_data["bid"]
+            sl = entry + (atr * self.sl_atr_multiplier)
+            tp = entry - (atr * self.tp_atr_multiplier)
+
+        try:
+            lot = self._calc_lot(symbol, entry, sl)
+        except Exception as e:
+            lot = symbol_info.volume_min
+
+        return {
+            "entry": round(entry, digits),
+            "sl": round(sl, digits),
+            "tp": round(tp, digits),
+            "lot": lot,
+            "risk_reward": round(self.tp_atr_multiplier / self.sl_atr_multiplier, 2)
+        }
+
+    # ========================================================================
+    #   MAIN SCAN METHOD
+    # ========================================================================
+
+    def scan_symbol(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Full analysis for a single symbol."""
+        if not self.enabled:
+            return None
+
+        if not self.ensure_symbol(symbol):
+            return None
+
+        mtf_data = self._fetch_mtf_data(symbol)
+        if not mtf_data:
+            return None
+
+        # Main timeframe for detailed analysis
+        tf_main = "M15" if "M15" in mtf_data else list(mtf_data.keys())[0]
+        main_df = mtf_data[tf_main]
+
+        # Technical analysis components
+        trend_info = self._analyze_trend_mtf(mtf_data)
+        momentum_info = self._analyze_momentum(main_df)
+        vol_info = self._analyze_volatility(main_df)
+        struct_info = self._analyze_structure(main_df)
+
+        # Adaptive confidence threshold
+        adaptive_min_conf = self._adaptive_min_confidence(
+            trend_overall=trend_info["overall"],
+            vol_regime=vol_info["regime"]
+        )
+
+        # Combine scores
+        scores = {
+            "trend_score": trend_info["trend_score"],
+            "momentum_score": momentum_info["momentum_score"],
+            "volatility_score": vol_info["volatility_score"],
+            "structure_score": struct_info["structure_score"]
+        }
+
+        dir_conf = self._build_direction_and_confidence(
+            trend_overall=trend_info["overall"],
+            momentum_mood=momentum_info["mood"],
+            structure_bias=struct_info["bias"],
+            scores=scores
+        )
+
+        direction = dir_conf["direction"]
+        base_conf = dir_conf["base_confidence"]
+        final_conf = base_conf
+
+        ai_block = {
+            "enabled": self.use_ai,
+            "ai_confidence": None,
+            "reasoning": [],
+            "direction_override": None,
+            "key_levels": {},
+            "risk_assessment": "unknown"
+        }
+
+        # AI analysis if enabled
+        if self.use_ai and self.mode in ("hybrid", "ai_only"):
+            tech_summary = {
+                "trend": trend_info,
+                "momentum": momentum_info,
+                "volatility": vol_info,
+                "structure": struct_info,
+                "base_direction": direction,
+                "base_confidence": base_conf,
+            }
+            ai_res = self._ai_analyze(symbol, tf_main, tech_summary)
+            ai_block.update(ai_res)
+
+            if self.mode == "ai_only" and ai_block["ai_confidence"] is not None:
+                final_conf = ai_block["ai_confidence"]
+                direction = ai_block["direction_override"] or direction
+            elif self.mode == "hybrid" and ai_block["ai_confidence"] is not None:
+                # Weighted average (60% TA, 40% AI)
+                final_conf = int((base_conf * 0.6) + (ai_block["ai_confidence"] * 0.4))
+
+        # Final filter
+        raw_direction = direction
+        raw_confidence = final_conf
+        if final_conf < adaptive_min_conf or direction is None:
+            direction = None
+
+        # Calculate trade levels if we have a signal
+        trade_levels = {}
+        if direction:
+            trade_levels = self._calculate_trade_levels(symbol, direction, vol_info["atr"])
+
+        result = {
+            "symbol": symbol,
+            "direction": direction,
+            "raw_direction": raw_direction,
+            "base_confidence": base_conf,
+            "final_confidence": final_conf,
+            "raw_confidence": raw_confidence,
+            "min_confidence": adaptive_min_conf,
+            "trend": trend_info,
+            "momentum": momentum_info,
+            "volatility": vol_info,
+            "structure": struct_info,
+            "scores": scores,
+            "ai": ai_block,
+            "trade_levels": trade_levels,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        return result
+
+    def scan_all(self) -> List[Dict[str, Any]]:
+        """Scan all loaded symbols."""
+        results = []
+        signals = []
+        raw_signals = []
+        blocked_by_conf = 0
+        blocked_by_direction = 0
+
+        print(f"\n{'='*70}")
+        print(f"REBEL INTELLIGENT SCANNER - Scan #{self.scan_count + 1}")
+        print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Mode: {self.mode.upper()} | AI: {'ON' if self.use_ai else 'OFF'}")
+        print(f"Symbols: {len(self.symbols)} | Min Confidence: {self.base_min_confidence}%")
+        print(f"{'='*70}")
+
+        for symbol in self.symbols:
+            try:
+                res = self.scan_symbol(symbol)
+                if res:
+                    results.append(res)
+                    if res.get("raw_direction"):
+                        raw_signals.append(res)
+                    if res["direction"]:
+                        signals.append(res)
+                    elif res.get("raw_direction") and res.get("raw_confidence", 0) < res.get("min_confidence", 0):
+                        blocked_by_conf += 1
+                    else:
+                        blocked_by_direction += 1
+            except Exception as e:
+                print(f"[ERROR] {symbol}: {e}")
+
+        self.scan_count += 1
+        self.signal_count += len(signals)
+
+        # Sort by confidence
+        signals = sorted(signals, key=lambda r: r.get("final_confidence", 0), reverse=True)
+
+        # Print signals
+        if signals:
+            print(f"\n[SIGNALS] Found: {len(signals)}")
+            print("-" * 70)
+            for sig in signals:
+                sym = sig["symbol"]
+                direction = sig["direction"].upper()
+                conf = sig["final_confidence"]
+                trend = sig["trend"]["overall"]
+                levels = sig.get("trade_levels", {})
+                
+                arrow = "[+]" if direction == "LONG" else "[-]"
+                print(f"{arrow} {sym:10} | {direction:5} | {conf:3d}% | Trend: {trend}")
+                
+                if levels:
+                    print(f"    Entry: {levels.get('entry', 'N/A')} | SL: {levels.get('sl', 'N/A')} | TP: {levels.get('tp', 'N/A')} | Lot: {levels.get('lot', 'N/A')}")
+                
+                if sig["ai"]["reasoning"]:
+                    print(f"    AI: {sig['ai']['reasoning'][0][:60]}...")
+                print()
+        else:
+            print("\n[--] No signals this scan")
+            if raw_signals:
+                raw_sorted = sorted(raw_signals, key=lambda r: r.get("raw_confidence", 0), reverse=True)
+                print(f"[INFO] Candidates with direction: {len(raw_signals)} | Blocked by confidence: {blocked_by_conf}")
+                print("[INFO] Top 5 candidates (raw):")
+                for sig in raw_sorted[:5]:
+                    sym = sig["symbol"]
+                    direction = sig["raw_direction"].upper()
+                    conf = sig.get("raw_confidence", 0)
+                    min_conf = sig.get("min_confidence", 0)
+                    trend = sig["trend"]["overall"]
+                    print(f"    {sym:10} | {direction:5} | {conf:3d}% (min {min_conf}%) | Trend: {trend}")
+            else:
+                print(f"[INFO] No directional candidates. Blocked by direction rules: {blocked_by_direction}")
+
+        print(f"\nTotal scans: {self.scan_count} | Total signals: {self.signal_count}")
+        print(f"{'='*70}\n")
+
+        return results
+
+    # ========================================================================
+    #   MAIN RUN LOOP
+    # ========================================================================
+
+    def run(self, continuous: bool = True):
+        """Main scanning loop."""
+        print("\n" + "=" * 70)
+        print("  REBEL INTELLIGENT SCANNER v2.0")
+        print("  AI-Driven Market Analysis Engine")
+        print("=" * 70)
+
+        if not self.connect():
+            print("[FATAL] Could not connect to MT5")
+            return
+
+        self.load_symbols()
+        if not self.symbols:
+            print("[FATAL] No symbols loaded")
+            self.disconnect()
+            return
+
+        print(f"\n[CONFIG] Mode: {self.mode}")
+        print(f"[CONFIG] Timeframes: {self.timeframes}")
+        print(f"[CONFIG] Symbols: {len(self.symbols)}")
+        print(f"[CONFIG] Scan interval: {self.scan_interval}s")
+        print(f"[CONFIG] Risk: {self.risk_percent}% | SL: {self.sl_atr_multiplier}x ATR | TP: {self.tp_atr_multiplier}x ATR")
+        
+        if self.use_ai:
+            print(f"[CONFIG] AI Model: {self.ai_model}")
+            key_info = self.api_key_masked or "none"
+            print(f"[CONFIG] AI Key: {self.api_key_source} ({key_info})")
+
+        print("\n[STATUS] Scanner running... Press Ctrl+C to stop\n")
+
+        try:
+            while True:
+                self.scan_all()
+
+                if not continuous:
+                    break
+
+                print(f"[WAIT] Next scan in {self.scan_interval}s...")
+                time.sleep(self.scan_interval)
+
+        except KeyboardInterrupt:
+            print("\n[STOP] Shutdown requested by user")
+        finally:
+            self.disconnect()
+
+
+# ============================================================================
+#   STANDALONE ENTRY POINT
+# ============================================================================
+
+def load_config() -> Dict[str, Any]:
+    """Load master configuration."""
+    if not os.path.exists(MASTER_CONFIG_PATH):
+        print(f"[WARN] Config not found: {MASTER_CONFIG_PATH}")
+        return {}
+    with open(MASTER_CONFIG_PATH, "r") as f:
+        return yaml.safe_load(f) or {}
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="REBEL Intelligent Scanner - AI-Driven Market Analysis")
+    parser.add_argument("--once", action="store_true", help="Run single scan and exit")
+    parser.add_argument("--interval", type=int, default=None, help="Scan interval in seconds")
+    parser.add_argument("--mode", choices=["ta_only", "ai_only", "hybrid"], default=None, help="Scanner mode")
+    parser.add_argument("--ai", action="store_true", help="Enable AI analysis")
+    parser.add_argument("--min_confidence", type=int, default=None, help="Override min confidence (0-100)")
+    args = parser.parse_args()
+
+    # Load config
+    config = load_config()
+
+    # Override config with CLI args
+    if "intelligent_scanner" not in config:
+        config["intelligent_scanner"] = {}
+
+    if args.interval:
+        config["intelligent_scanner"]["scan_interval"] = args.interval
+    if args.mode:
+        config["intelligent_scanner"]["mode"] = args.mode
+    if args.ai:
+        config["intelligent_scanner"]["use_ai"] = True
+    if args.min_confidence is not None:
+        config["intelligent_scanner"]["min_confidence"] = args.min_confidence
+
+    # Create and run scanner
+    scanner = RebelIntelligentScanner(config)
+    scanner.run(continuous=not args.once)

@@ -1,0 +1,59 @@
+============================================================
+  RANDOM FOREST v1 - TRAINING REPORT
+============================================================
+  Date: 2025-12-16 23:31:33
+  Dataset: C:\MT5Bot\ML\training_dataset.csv
+
+  PERFORMANCE METRICS
+------------------------------------------------------------
+  Accuracy:  0.7079 (70.8%)
+  Precision: 0.5165
+  Recall:    0.4123
+  F1 Score:  0.4585
+  ROC AUC:   0.6994
+
+  CONFUSION MATRIX
+------------------------------------------------------------
+                 Predicted
+                 Loss    Win
+  Actual Loss      222     44
+  Actual Win        67     47
+
+  CLASSIFICATION REPORT
+------------------------------------------------------------
+              precision    recall  f1-score   support
+
+        Loss       0.77      0.83      0.80       266
+         Win       0.52      0.41      0.46       114
+
+    accuracy                           0.71       380
+   macro avg       0.64      0.62      0.63       380
+weighted avg       0.69      0.71      0.70       380
+
+
+  TOP 20 FEATURE IMPORTANCES
+------------------------------------------------------------
+   1. spread_ratio                   0.0669 ###
+   2. volatility_zscore              0.0467 ##
+   3. volatility_regime              0.0421 ##
+   4. adx                            0.0413 ##
+   5. spread_delta                   0.0390 #
+   6. ema_slow_angle                 0.0378 #
+   7. ema_fast_angle                 0.0371 #
+   8. rsi                            0.0360 #
+   9. atr_ratio                      0.0356 #
+  10. macd_abs                       0.0354 #
+  11. volatility_acceleration        0.0354 #
+  12. volatility_delta               0.0347 #
+  13. minute                         0.0346 #
+  14. hour                           0.0343 #
+  15. macd_hist                      0.0319 #
+  16. ema_fast                       0.0271 #
+  17. spread_volatility_ratio        0.0267 #
+  18. atr                            0.0264 #
+  19. distance_price_fast            0.0262 #
+  20. tp_distance                    0.0259 #
+
+============================================================
+  Model saved to: C:\MT5Bot\ML\model_rf_v1.joblib
+============================================================

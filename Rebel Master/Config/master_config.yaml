@@ -1,0 +1,547 @@
+
+# REBEL MASTER CONFIG - CLEAN BASE
+
+broker:
+  type: mt5              # broker connector type: mt5 (more coming soon)
+
+mt5:
+  login: 10020166
+  password: "Marty123#"                # Fill in your password
+  server: "Axi-us50-demo"                  # Fill in your server (e.g., "Axi-Live")
+  path: "C:/Rebel Master/terminal64.exe"
+scanner:
+  symbols:
+    - EURUSD
+    - GBPUSD
+    - USDJPY
+    - XAUUSD
+  timeframe: H1
+  history_bars: 200
+  min_score: 4
+
+# Skip scanning symbols that never pass filters (saves time)
+filter_skip:
+  enabled: true
+  max_failed_scans: 30
+  state_file: "C:/Rebel Technologies/Rebel Master/logs/filter_skip_state.json"
+
+# Auto-purge symbols with consistently poor results
+symbol_purge:
+  enabled: true
+  min_trades: 30
+  per_group_min_trades:
+    forex: 30
+    indices: 40
+    metals: 35
+  min_losses: 6
+  max_win_rate: 0.40
+  state_file: "C:/Rebel Technologies/Rebel Master/logs/trade_limiter_state.json"
+
+strategy:
+  mode: conservative        # conservative | normal | aggressive
+  min_score:
+    conservative: 4         # require 4/5 score for conservative mode (loosened for rules-only validation)
+    normal: 4               # require 4/5 score for normal mode (was 3)
+    aggressive: 3           # require 3/5 score for aggressive mode (was 2)
+
+# Core validation progress (uses closed trades counter)
+core_validation:
+  enabled: true
+  target_trades: 500
+
+trading:
+  auto_trade: true         # MASTER SWITCH: set true to enable live trading
+  kill_switch: false      # emergency halt (true = no new trades)
+  kill_switch_drawdown_percent: 10.0  # auto-halt if drawdown >= 10%
+  force_min_lot: true      # force broker minimum (micro units)
+  sl_atr_multiplier: 2.0    # stop loss = 2x ATR
+  tp_atr_multiplier: 3.0    # take profit = 3x ATR
+  max_spread_atr_ratio: 3.0  # spread filter (3.0 recommended, 4.0 safer)
+  training_lot_cap: 1.0     # allow crypto to reach broker min lots
+  hard_lot_cap: 1.0         # absolute lot ceiling across all symbols
+
+risk:
+  max_open_trades: 8
+  max_risk_per_trade: 0.01
+  max_daily_drawdown: 0.03
+
+safety:
+  enabled: true
+  max_daily_loss_percent: 2.0   # block trading if daily loss exceeds 2%
+  max_trades_per_day: 50        # global max (fallback, per-class limits take priority)
+  
+  # Per-asset-class daily limits for BALANCED ML training data
+  # Total = 18 + 10 + 8 + 7 + 4 + 3 = 50 trades/day max
+  # FX+Crypto = 56% | Others = 44% (balanced for ML training)
+  asset_class_limits:
+    forex: 18       # 36% (largest universe, 74 symbols)
+    crypto: 10      # 20% (good liquidity, 24/7)
+    metals: 8       # 16% (strong performers)
+    indices: 7      # 14% (good diversity)
+    energies: 4     # 8% (smaller universe)
+    softs: 3        # 6% (limited symbols)
+
+# Trade limiter rules (per-symbol attempts + win-rate floor)
+trade_limiter:
+  max_attempts_per_symbol: 30
+  min_trades_for_win_rate: 30
+  min_win_rate: 0.40
+
+# Optional per-family indicator overrides (disabled by default)
+indicator_overrides:
+  enabled: true
+  defaults:
+    ema_fast: 9
+    ema_mid: 21
+    ema_slow: 21
+    rsi_period: 14
+    rsi_long_min: 55
+    rsi_short_max: 45
+  families:
+    fx_major:
+      ema_fast: 9
+      ema_mid: 21
+      ema_slow: 21
+      rsi_long_min: 55
+      rsi_short_max: 45
+    fx_minor:
+      ema_fast: 9
+      ema_mid: 21
+      ema_slow: 21
+      rsi_long_min: 55
+      rsi_short_max: 45
+    fx_exotic:
+      ema_fast: 9
+      ema_mid: 21
+      ema_slow: 21
+      rsi_long_min: 60
+      rsi_short_max: 40
+    metals:
+      ema_fast: 9
+      ema_mid: 21
+      ema_slow: 21
+      rsi_long_min: 60
+      rsi_short_max: 40
+    crypto:
+      ema_fast: 9
+      ema_mid: 21
+      ema_slow: 21
+      rsi_long_min: 50
+      rsi_short_max: 50
+    indices:
+      ema_fast: 9
+      ema_mid: 21
+      ema_slow: 21
+      rsi_long_min: 60
+      rsi_short_max: 40
+    softs:
+      ema_fast: 9
+      ema_mid: 21
+      ema_slow: 21
+      rsi_long_min: 60
+      rsi_short_max: 40
+
+baseline_locked:
+  enabled: false
+  spread_max: 0.040
+  rr_min: 1.2
+  rsi_min: 20
+  rsi_max: 80
+  ema_bias: true
+  allow_missing_features: false
+
+# ======================================================================== #
+#  INTELLIGENT SCANNER - Confidence Layer (runs after score gate)
+# ======================================================================== #
+intelligent_scanner:
+  enabled: true
+  mode: "ta_only"              # ta_only | hybrid | ai_only (AI off for validation)
+  use_ai: false                # Keep AI off during core validation
+  min_confidence: 65           # Global minimum confidence (0-100)
+  timeframes: ["H1"]          # H1 only — no M5/M15 interference
+  bars: 400
+  sl_atr_multiplier: 2.0
+  tp_atr_multiplier: 3.0
+
+  # Per-family confidence thresholds (override global min_confidence)
+  confidence_thresholds:
+    fx_major: 65
+    fx_minor: 65
+    fx_exotic: 70
+    metals: 60                 # Historically strong — let more through
+    indices: 65
+    crypto: 70
+    energies: 65
+    softs: 65
+
+# 5-gate signal filters (trend, volatility, candle, spread, session)
+# Disable during rules-only validation to let score alone decide
+signal_filters:
+  enabled: false
+
+# Quick toggle: validate core rules only (disables AI/ML in engine)
+rules_only: true
+
+# ML trade feature logging (disable to avoid dataset pollution during validation)
+ml_feature_logging:
+  enabled: false
+
+telegram:
+  enabled: false            # set true to enable Telegram alerts
+  bot_token: ""             # your Telegram bot token from @BotFather
+  chat_id: ""               # your Telegram chat ID
+
+ai:
+  enabled: false
+  mode: "none"   # base mode for now
+  gpt_enabled: false  # master GPT switch
+  gpt_observe_at: 750
+  gpt_decide_start: 1250
+  gpt_decide_end: 1499
+  gpt_observe_dual_at: 750
+  gpt_model_primary: "gpt-4o-mini"
+  gpt_model_secondary: "gpt-4o"
+  gpt_secondary_split: 0.20
+  gpt_dual_model_start: 1500
+  gpt_max_tokens: 200
+  gpt_temperature: 0.1
+  openai_api_key: ""
+  scaling_training_start: 1250
+
+# ======================================================================== #
+#  ML TRADE FILTER - Random Forest Model
+# ======================================================================== #
+
+ml_filter:
+  enabled: false             # enforce ML filter
+  model: "rf_v1"              # model to use: rf_v1, rf_v2, rf_v3, rf_v3_production
+  min_win_prob: 0.55          # minimum P(win) to allow trade (0.55 = 55%)
+  max_loss_prob: 0.70        # reject if P(loss) above this
+  log_decisions: true        # log all ML decisions to file
+
+  # Auto-staging by trade count (uses training_dataset.csv)
+  staging:
+    enabled: false
+    stages:
+      - name: phase_0_base
+        min_trades: 0
+        max_trades: 499
+        model: "rf_v1"
+        min_win_prob: 0.55
+        group_threshold: 0.55
+      - name: phase_1_validate
+        min_trades: 500
+        max_trades: 999
+        model: "rf_v3_production"
+        min_win_prob: 0.60
+        group_threshold: 0.60
+      - name: phase_2_pre_ai
+        min_trades: 1000
+        max_trades: 1749
+        model: "rf_v3_production"
+        min_win_prob: 0.65
+        group_threshold: 0.65
+      - name: phase_4_dual_model
+        min_trades: 1750
+        max_trades: 1999
+        model: "rf_v3_production"
+        min_win_prob: 0.65
+        group_threshold: 0.65
+      - name: phase_5_full_deploy
+        min_trades: 2000
+        max_trades: 999999
+        model: "rf_v3_production"
+        min_win_prob: 0.65
+        group_threshold: 0.65
+  
+  # Per-group ML thresholds
+  group_thresholds:
+    forex: 0.55
+    crypto: 0.55
+    indices: 0.55
+    metals: 0.55
+    energies: 0.55
+    softs: 0.55
+  
+  # NO BYPASS - all asset classes go through same process for consistent data
+  bypass_groups: []
+  
+  # Hard filters (applied on top of ML probability)
+  hard_filters:
+    max_spread_ratio: 0.005       # fallback if class not specified
+    max_spread_ratio_by_class:
+      fx: 0.20
+      fx_exotic: 0.60
+      metals: 0.35
+      indices: 0.30
+      energies: 0.35
+      softs: 0.50
+      crypto: 0.60
+    max_spread_vol_ratio: 0.25    # spread/volatility guard
+    min_reward_risk: 1.2          # minimum R:R ratio
+    block_rsi_midzone: false      # block RSI 45-55 chop zone
+
+logging:
+  level: INFO
+  file: "../Logs/rebel.log"
+
+# ======================================================================== #
+#  SYMBOL UNIVERSE – FINAL LIST
+# ======================================================================== #
+
+symbols:
+  use_groups: true
+
+  groups:
+
+    forex:
+      enabled: true
+      symbols:
+        - AUDCAD
+        - AUDCHF
+        - AUDJPY
+        - AUDNZD
+        - AUDSGD
+        - AUDUSD
+        - CADCHF
+        - CADJPY
+        - CADSGD
+        - CHFJPY
+        - CHFSEK
+        - CHFSGD
+        - EURAUD
+        - EURCAD
+        - EURCHF
+        - EURCZK
+        - EURGBP
+        - EURHUF
+        - EURJPY
+        - EURNOK
+        - EURNZD
+        - EURPLN
+        - EURSEK
+        - EURSGD
+        - EURUSD
+        - EURZAR
+        - GBPAUD
+        - GBPCAD
+        - GBPCHF
+        - GBPJPY
+        - GBPMXN
+        - GBPNOK
+        - GBPNZD
+        - GBPSEK
+        - GBPSGD
+        - GBPUSD
+        - MXNJPY
+        - NOKJPY
+        - NOKSEK
+        - NZDCAD
+        - NZDCHF
+        - NZDJPY
+        - NZDUSD
+        - SGDJPY
+        - USDCAD
+        - USDCHF
+        - USDCNH
+        - USDCZK
+        - USDHUF
+        - USDINR
+        - USDJPY
+        - USDMXN
+        - USDNOK
+        - USDPLN
+        - USDRON
+        - USDSEK
+        - USDSGD
+        - USDTHB
+        - USDZAR
+        - ZARJPY
+        - USDHKD
+        - USDBRL
+        - USDCLP
+        - USDCOP
+        - USDIDR
+        - USDKRW
+        - USDTWD
+        - USDUSC
+        - USDCAC
+        - USDCHC
+        - USDSGC
+        - EUCUSD
+        - USDJPC
+
+    commodities:
+      enabled: true
+      symbols:
+        - XAUUSD
+        - XAUEUR
+        - XAUAUD
+        - XAUGBP
+        - XAGUSD
+        - XPTUSD
+        - BRENT.fs
+        - WTI.fs
+        - UKOIL
+        - USOIL
+        - NATGAS.fs
+        - SOYBEAN.fs
+        - COCOA.fs
+        - COFFEE.fs
+        - COPPER.fs
+
+    indices:
+      enabled: true
+      symbols:
+        - AUS200
+        - CN50
+        - EU50
+        - FRA40
+        - HK50
+        - JPN225
+        - US30
+        - GER40
+        - IT40
+        - SGFREE
+        - SWI20
+        - SPA35
+        - UK100
+        - US500
+        - US2000
+        - USTECH
+        - NETH25
+        - CAC40.fs
+        - CHINA50.fs
+        - EUSTX50.fs
+        - HSI.fs
+        - NAS100.fs
+        - NK225.fs
+        - S&P.fs
+        - SPI200.fs
+        - DAX40.fs
+        - DJ30.fs
+        - FT100.fs
+        - USDINDEX.fs
+        - VIX.fs
+
+    crypto:
+      enabled: true
+      symbols:
+        # Core set (keep list tight for unit control)
+        - BTCUSD
+        - ETHUSD
+        - XRPUSD
+        - ADAUSD
+        - DOTUSD
+        - LTCUSD
+        - BCHUSD
+        - SOL-USD
+        - AVAX-USD
+        - BNB-USD
+
+# ======================================================================== #
+#  ADVANCED RISK ENGINE – 3% RULE + 30% EXPOSURE LIMIT
+# ======================================================================== #
+
+risk_engine:
+  enabled: true
+
+  # Per-trade: 3% risk (max loss if SL hit) AND 3% margin per trade
+  percent_risk_per_trade: 1.0
+
+  # Optional safety floor/ceiling in account currency
+  min_risk_per_trade_currency: 1.0
+  max_risk_per_trade_currency: 999999.0
+
+  # MAX TOTAL margin for all open trades: 30% (allows up to 10 trades at 3% each)
+  max_equity_exposure_pct: 30.0
+
+# ======================================================================== #
+#  PROFIT LOCK SYSTEM – "40 BLUE SHOULD WIN"
+# ======================================================================== #
+
+profit_lock:
+  enabled: true
+  timeframe: H1               # timeframe for ATR calculation
+  min_atr: 0.50               # ignore ATR below this (too noisy)
+  initial_sl_atr: 2.0         # initial SL distance in ATR (for R calc)
+
+  tiers:
+    # Tier 1: when trade is +1 ATR → move SL to just better than BE
+    - trigger_atr: 1.0
+      lock_distance_atr: 1.2  # SL ≈ entry + small cushion
+      min_lock_rr: 0.1        # lock at least +0.1R if possible
+
+    # Tier 2: when trade is +1.5 ATR → start locking real profit
+    - trigger_atr: 1.5
+      lock_distance_atr: 0.9
+      min_lock_rr: 0.4
+
+    # Tier 3: when trade is +2 ATR → trail tighter
+    - trigger_atr: 2.0
+      lock_distance_atr: 0.7
+      min_lock_rr: 0.8
+
+    # Tier 4: when trade is +2.5 ATR → lock aggressively
+    - trigger_atr: 2.5
+      lock_distance_atr: 0.5
+      min_lock_rr: 1.2
+
+# ======================================================================== #
+#  SESSION HOURS – QUIET MODE FILTERING (UTC TIMES)
+# ======================================================================== #
+
+session_filter:
+  enabled: true
+
+sessions:
+
+  fx:
+    open: "00:00"
+    close: "23:59"
+    days: ["mon","tue","wed","thu","fri"]
+
+  metals:
+    open: "00:00"
+    close: "23:00"
+    days: ["mon","tue","wed","thu","fri"]
+
+  crypto:
+    open: "00:00"
+    close: "23:59"
+    days: ["sun","mon","tue","wed","thu","fri","sat"]
+
+  indices_eu:
+    open: "07:00"
+    close: "15:30"
+    days: ["mon","tue","wed","thu","fri"]
+
+  indices_us:
+    open: "13:30"
+    close: "20:00"
+    days: ["mon","tue","wed","thu","fri"]
+
+  indices_asia:
+    open: "00:00"
+    close: "06:00"
+    days: ["mon","tue","wed","thu","fri"]
+
+  energies:
+    open: "00:00"
+    close: "22:00"
+    days: ["mon","tue","wed","thu","fri"]
+
+  softs:
+    open: "08:00"
+    close: "13:00"
+    days: ["mon","tue","wed","thu","fri"]
+
+# ======================================================================== #
+#  WEEKEND SHUTDOWN – HARD FRIDAY CLOSE + WEEKEND BLOCK
+# ======================================================================== #
+
+weekend:
+  enabled: true
+  friday_shutdown_utc: "22:00"    # Friday 2PM Pacific (10PM UTC)
+  resume_sunday_utc: "22:00"      # Sunday 2PM Pacific (10PM UTC)
+  close_all_positions: true

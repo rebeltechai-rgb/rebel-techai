@@ -1,0 +1,23 @@
+# RF v3 Production Features
+# Created: 2026-01-06 07:50:38
+# Total features: 18
+
+# Ranked by importance:
+spread_ratio,0.213356
+atr_ratio,0.094207
+spread_delta,0.069374
+rsi,0.067234
+volatility_regime,0.060378
+volatility_zscore,0.055280
+minute,0.054947
+adx,0.054812
+atr,0.042003
+hour,0.039077
+tp_distance,0.036215
+spread_volatility_ratio,0.034910
+macd_hist,0.033822
+entry_price,0.032151
+sl,0.031140
+tp,0.028403
+ema_slow,0.026773
+ema_fast,0.025917

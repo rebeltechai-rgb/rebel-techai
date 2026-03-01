@@ -1,0 +1,87 @@
+============================================================
+  RANDOM FOREST v2 - TRAINING REPORT
+============================================================
+  Date: 2025-12-19 14:20:39
+  Dataset: C:\MT5Bot\ML\training_dataset.csv
+  Training samples: 1672
+  Test samples: 418
+
+  PERFORMANCE METRICS
+------------------------------------------------------------
+  Accuracy:  0.6866 (68.7%)
+  Precision: 0.5048
+  Recall:    0.4015
+  F1 Score:  0.4473
+  ROC AUC:   0.6515
+  Optimal Threshold: 0.476
+  OOB Score: 0.6751
+
+  CONFUSION MATRIX
+------------------------------------------------------------
+                 Predicted
+                 Loss    Win
+  Actual Loss      234     52
+  Actual Win        79     53
+
+  When model predicts WIN: 50.5% are actually wins
+  When model predicts LOSS: 74.8% are actually losses
+
+  CLASSIFICATION REPORT
+------------------------------------------------------------
+              precision    recall  f1-score   support
+
+        Loss       0.75      0.82      0.78       286
+         Win       0.50      0.40      0.45       132
+
+    accuracy                           0.69       418
+   macro avg       0.63      0.61      0.61       418
+weighted avg       0.67      0.69      0.68       418
+
+
+  TOP 25 FEATURE IMPORTANCES
+------------------------------------------------------------
+   1. spread_ratio                   0.0765 ###
+   2. volatility_zscore              0.0437 ##
+   3. atr_ratio                      0.0412 ##
+   4. rsi                            0.0402 ##
+   5. volatility_regime              0.0397 #
+   6. adx                            0.0396 #
+   7. volatility_acceleration        0.0351 #
+   8. spread_delta                   0.0350 #
+   9. volatility_delta               0.0334 #
+  10. macd_abs                       0.0330 #
+  11. ema_slow_angle                 0.0326 #
+  12. ema_fast_angle                 0.0326 #
+  13. minute                         0.0319 #
+  14. macd_hist                      0.0310 #
+  15. hour                           0.0299 #
+  16. atr                            0.0282 #
+  17. tp                             0.0280 #
+  18. ema_slow                       0.0264 #
+  19. reward_risk_ratio              0.0263 #
+  20. sl                             0.0263 #
+  21. ema_fast                       0.0261 #
+  22. distance_price_fast            0.0258 #
+  23. distance_price_slow            0.0255 #
+  24. entry_price                    0.0249 #
+  25. spread_volatility_ratio        0.0241 #
+
+  V2 IMPROVEMENTS
+------------------------------------------------------------
+  - 200 trees (vs 100 in v1)
+  - Deeper trees (max_depth=12)
+  - Out-of-bag validation
+  - Balanced subsample weighting
+  - Optimal probability threshold
+
+============================================================
+  Model saved to: C:\MT5Bot\ML\model_rf_v2.joblib
+============================================================
+
+  CROSS-VALIDATION RESULTS
+------------------------------------------------------------
+  Accuracy: 0.6946 (+/- 0.0269)
+  ROC AUC:  0.6585 (+/- 0.0517)
+  F1 Score: 0.4488 (+/- 0.0700)
+
+  Optimal probability threshold: 0.476

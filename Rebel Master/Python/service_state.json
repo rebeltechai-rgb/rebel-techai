@@ -1,0 +1,52 @@
+{
+  "open_trades": 6,
+  "by_asset_class": {
+    "FX": 6,
+    "CRYPTO": 0,
+    "METALS": 0,
+    "INDICES": 0,
+    "ENERGIES": 0,
+    "SOFTS": 0
+  },
+  "positions": [
+    {
+      "symbol": "CADSGD",
+      "side": "SHORT",
+      "volume": 0.01
+    },
+    {
+      "symbol": "USDTHB",
+      "side": "SHORT",
+      "volume": 0.01
+    },
+    {
+      "symbol": "EURUSD",
+      "side": "LONG",
+      "volume": 0.01
+    },
+    {
+      "symbol": "NZDCAD",
+      "side": "LONG",
+      "volume": 0.01
+    },
+    {
+      "symbol": "GBPCHF",
+      "side": "LONG",
+      "volume": 0.01
+    },
+    {
+      "symbol": "GBPCAD",
+      "side": "LONG",
+      "volume": 0.01
+    }
+  ],
+  "timestamp": "2026-02-11T12:37:32.744070+00:00",
+  "health": {
+    "supervisor_alive": true,
+    "last_heartbeat": "2026-02-11T12:37:32.744070+00:00",
+    "poll_drift_seconds": 0.008,
+    "mt5_connected": true,
+    "last_mt5_ok": "2026-02-11T12:37:32.744070+00:00",
+    "engine_alive": true
+  }
+}

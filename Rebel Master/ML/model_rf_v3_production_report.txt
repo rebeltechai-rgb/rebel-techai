@@ -1,0 +1,62 @@
+============================================================
+  RANDOM FOREST v3 PRODUCTION - MODEL REPORT
+============================================================
+  Date: 2026-01-06 07:50:37
+  Dataset: C:\Rebel Technologies\Rebel Master\ML\training_dataset.csv
+  Total training samples: 505
+  Test samples: 101
+  Features used: 18
+
+------------------------------------------------------------
+  HOLDOUT TEST SET PERFORMANCE
+------------------------------------------------------------
+  Accuracy:   0.6634 (66.3%)
+  Precision:  0.5818
+  Recall:     0.7442
+  F1 Score:   0.6531
+  ROC AUC:    0.7502
+
+------------------------------------------------------------
+  CONFUSION MATRIX
+------------------------------------------------------------
+                  Predicted
+                  Loss    Win
+  Actual Loss       35      23
+  Actual Win        11      32
+
+------------------------------------------------------------
+  TRADING METRICS (PRODUCTION)
+------------------------------------------------------------
+  Trades predicted as WIN: 55
+  Actual wins from those:  32
+  PRODUCTION WIN RATE:     58.2%
+  Missed opportunities:    11 (wins predicted as loss)
+  Bad calls avoided:       35 (losses correctly skipped)
+
+------------------------------------------------------------
+  TOP 10 FEATURE IMPORTANCES
+------------------------------------------------------------
+  1. spread_ratio              0.2134
+  2. atr_ratio                 0.0942
+  3. spread_delta              0.0694
+  4. rsi                       0.0672
+  5. volatility_regime         0.0604
+  6. volatility_zscore         0.0553
+  7. minute                    0.0549
+  8. adx                       0.0548
+  9. atr                       0.0420
+  10. hour                      0.0391
+
+============================================================
+  [*] RF v3 PRODUCTION MODEL READY!
+  Model saved to: C:\Rebel Technologies\Rebel Master\ML\model_rf_v3_production.joblib
+============================================================
+
+------------------------------------------------------------
+  CROSS-VALIDATION RESULTS (10-fold)
+------------------------------------------------------------
+  ACCURACY    : 0.6705 (+/- 0.1302)
+  PRECISION   : 0.6173 (+/- 0.1715)
+  RECALL      : 0.6247 (+/- 0.1475)
+  F1          : 0.6177 (+/- 0.1353)
+  ROC_AUC     : 0.7368 (+/- 0.1242)

@@ -1,0 +1,10 @@
+# REBEL Trading Bot - Python Dependencies
+# Compatible with Python 3.12
+
+MetaTrader5>=5.0.45
+PyYAML>=6.0
+numpy>=1.26.0
+pandas>=2.1.0
+requests>=2.31.0
+flask>=3.0.0
+

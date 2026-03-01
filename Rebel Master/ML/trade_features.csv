@@ -1,0 +1,8 @@
+﻿timestamp,ticket,symbol,direction,entry_price,sl,tp,volume,score,ema_fast,ema_slow,rsi,atr,adx,macd_hist,trend_bias,volatility_regime,spread_ratio,session_state,raw_signal,signal_score,reason
+2026-02-10 17:39:31,29471006,CADCHF,long,0.56691,0.56533,0.56928,0.01,5,0.56564,0.56554,60.79,0.00079,29.57,0.000221,1,1.0295,0.113924,2,1,5,"ema_cross,trend_aligned,rsi_confirms,atr_ok,adx_strong"
+2026-02-10 19:45:24,29503061,AUDCHF,long,0.54355,0.54171,0.54631,0.01,5,0.54256,0.54254,58.08,0.00092,37.86,0.000199,1,1.1125,0.108696,2,1,5,"ema_cross,trend_aligned,rsi_confirms,atr_ok,adx_strong"
+2026-02-10 19:45:24,29503063,NZDCHF,long,0.46452,0.4632,0.4665,0.01,5,0.46365,0.46359,58.63,0.00066,39.55,0.000227,1,0.9239,0.166667,2,1,5,"ema_cross,trend_aligned,rsi_confirms,atr_ok,adx_strong"
+2026-02-10 19:46:34,29503398,CHFSGD,short,1.64706,1.65132,1.64067,0.01,4,1.64946,1.64967,43.17,0.00213,19.94,-0.000888,-1,1.0838,0.117371,2,-1,4,"ema_cross,trend_aligned,rsi_confirms,atr_ok"
+2026-02-10 19:46:38,29503457,USDMXN,short,17.18666,17.24738,17.09558,0.01,4,17.20619,17.20751,41.76,0.03036,10.95,0.001866,-1,1.1979,0.158103,2,-1,4,"ema_cross,trend_aligned,rsi_confirms,atr_ok"
+2026-02-10 19:47:43,29503944,NATGAS.fs,short,3.125,3.21,2.998,0.01,4,3.13716,3.1387,43.98,0.04236,25.46,0.009719,-1,1.1367,0.283286,2,-1,4,"ema_cross,trend_aligned,rsi_confirms,atr_ok"
+2026-02-10 19:47:43,29503945,CN50,long,15032.05,14996.36,15085.58,0.1,4,15015.80863,15014.93898,55.28,17.84286,12.35,-0.812156,1,0.7474,0.252202,2,1,4,"ema_cross,trend_aligned,rsi_confirms,atr_ok"
