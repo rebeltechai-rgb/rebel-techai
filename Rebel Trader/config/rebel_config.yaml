@@ -12,9 +12,9 @@ symbol_suffix: ""          # Add suffix like ".sa" if needed
 
 # --- MT5 Connection ---
 mt5:
-  login: 10018026
+  login: 60021050
   password: "Marty123#"
-  server: "Axi-us50-demo"
+  server: "AXI-US51-LIVE"
   path: "C:/Program Files/Axi MetaTrader 5 Terminal/terminal64.exe"
 
 # --- Trading Hours (Kamloops BC / Pacific Time) ---
