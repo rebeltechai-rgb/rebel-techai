@@ -6,6 +6,7 @@ Orchestrates all components
 
 import csv
 import os
+import sys
 import json
 import time
 import yaml
@@ -28,6 +29,17 @@ from .ai_brain import AIBrain
 from .executor import TradeExecutor
 from .risk_manager import RiskManager, ProfitLock
 from .scanner_bridge import ScannerBridge
+
+# Intelligent Scanner imports (Trader's own copy)
+_SCANNER_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Scanner")
+if _SCANNER_DIR not in sys.path:
+    sys.path.insert(0, _SCANNER_DIR)
+try:
+    from rebel_intelligent_scanner import RebelIntelligentScanner
+    HAS_INTELLIGENT_SCANNER = True
+except ImportError as e:
+    print(f"[WARN] Intelligent Scanner not available: {e}")
+    HAS_INTELLIGENT_SCANNER = False
 
 
 class RebelEngine:
@@ -83,6 +95,29 @@ class RebelEngine:
             except Exception as e:
                 print(f"[!] Scanner Bridge not available: {e}")
         
+        # Intelligent Scanner (confidence gate layer — same pattern as Master)
+        is_cfg = self.config.get("intelligent_scanner", {}) or {}
+        self.intelligent_scanner_enabled = bool(is_cfg.get("enabled", False)) and HAS_INTELLIGENT_SCANNER
+        self.intelligent_scanner = None
+        self.scanner_session_confidence = is_cfg.get("session_confidence", {})
+        self.scanner_global_min_conf = int(is_cfg.get("min_confidence", 65))
+        if self.intelligent_scanner_enabled:
+            try:
+                self.intelligent_scanner = RebelIntelligentScanner(self.config)
+                self.intelligent_scanner.adapter._connected = True
+                self.intelligent_scanner.connected = True
+                print(f"[SCANNER] Intelligent Scanner ACTIVE (min_conf={self.scanner_global_min_conf}%)")
+            except Exception as e:
+                print(f"[SCANNER] Failed to initialize Intelligent Scanner: {e}")
+                self.intelligent_scanner_enabled = False
+
+        # R:R Blocker state (per symbol+session cumulative R:R after N trades)
+        rr_cfg = self.config.get("rr_blocker", {}) or {}
+        self.rr_blocker_enabled = bool(rr_cfg.get("enabled", False))
+        self.rr_blocker_min_trades = int(rr_cfg.get("min_trades", 30))
+        self._rr_blocker_cache = {}
+        self._rr_blocker_cache_ts = None
+
         # Build symbol list
         self.symbols = self._build_symbol_list()
         self.executor.set_family_groups(self.config.get('enabled_groups', []))
@@ -112,7 +147,10 @@ class RebelEngine:
             deploy_at = int(ai_cfg.get("gpt_deploy_start", 1750))
             print(f"GPT Shadow: ACTIVE — logging to gpt_shadow_log.jsonl")
             print(f"GPT Deploy: At {deploy_at} governed trades GPT decides on its own")
-        print(f"Scanner: {'Integrated' if self.scanner else 'Standalone only'}")
+        is_label = "Integrated" if self.scanner else ("Confidence Gate" if self.intelligent_scanner_enabled else "Standalone only")
+        print(f"Scanner: {is_label}")
+        if self.rr_blocker_enabled:
+            print(f"R:R Blocker: ACTIVE (min_trades={self.rr_blocker_min_trades})")
         print(f"Dry Run: {self.config.get('execution', {}).get('dry_run', False)}")
         print(f"{'='*60}\n")
     
@@ -573,7 +611,51 @@ class RebelEngine:
         # Log analysis
         status = "[OK]" if direction != "HOLD" else "[--]"
         print(f"  {status} {symbol} [{group}]: Score={score}, Dir={direction}, Conf={confidence}%")
-        
+
+        # ============================================
+        # INTELLIGENT SCANNER CONFIDENCE GATE
+        # ============================================
+        if direction != "HOLD" and self.intelligent_scanner_enabled and self.intelligent_scanner:
+            try:
+                scan_result = self.intelligent_scanner.scan_symbol(symbol)
+                if scan_result and scan_result.get("final_confidence") is not None:
+                    scanner_conf = int(scan_result["final_confidence"])
+                    scanner_dir = scan_result.get("direction")
+                    session = get_current_session()
+                    min_conf = self._get_scanner_session_confidence(session)
+
+                    if scanner_conf < min_conf:
+                        print(f"    [SCANNER:BLOCKED] {symbol}: confidence {scanner_conf}% < {min_conf}% (session={session})")
+                        direction = "HOLD"
+                        confidence = 0
+                    else:
+                        engine_dir = direction.upper()
+                        s_dir = (scanner_dir or "").upper()
+                        if s_dir in ("LONG", "BUY"):
+                            s_dir = "BUY"
+                        elif s_dir in ("SHORT", "SELL"):
+                            s_dir = "SELL"
+                        if s_dir and s_dir != engine_dir and s_dir != "HOLD":
+                            decision["risk_scale"] = decision.get("risk_scale", 1.0) * 0.5
+                            print(f"    [SCANNER:WARN] {symbol}: direction mismatch (engine={engine_dir}, scanner={s_dir}) conf={scanner_conf}% — half risk")
+                        else:
+                            print(f"    [SCANNER:OK] {symbol}: confidence={scanner_conf}% (min={min_conf}%, session={session})")
+                else:
+                    print(f"    [SCANNER] {symbol}: no result — passing on score only")
+            except Exception as e:
+                print(f"    [SCANNER] {symbol}: error — {e}")
+
+        # ============================================
+        # R:R BLOCKER (per symbol + session)
+        # ============================================
+        if direction != "HOLD" and self.rr_blocker_enabled:
+            session = get_current_session()
+            blocked, reason = self._check_rr_blocker(symbol, session)
+            if blocked:
+                print(f"    [RR:BLOCKED] {symbol} ({session}): {reason}")
+                direction = "HOLD"
+                confidence = 0
+
         # Hard daily trade cap (uses persisted daily counter)
         if direction != "HOLD":
             max_daily = int(self.config.get("risk", {}).get("max_daily_trades", 20))
@@ -1082,6 +1164,109 @@ class RebelEngine:
         base = int(group_conf.get(group, default_conf))
         governed_min = self.governance_targets.get("min_confidence")
         return max(base, int(governed_min)) if isinstance(governed_min, int) else base
+
+    def _get_scanner_session_confidence(self, session: str) -> int:
+        """Get minimum scanner confidence for the current session."""
+        return int(self.scanner_session_confidence.get(
+            session.upper(), self.scanner_global_min_conf
+        ))
+
+    # ------------------------------------------------------------------
+    # R:R BLOCKER — blocks symbol+session combos with negative cumulative
+    # R:R after a minimum number of trades
+    # ------------------------------------------------------------------
+
+    def _check_rr_blocker(self, symbol: str, session: str) -> tuple:
+        """
+        Returns (blocked: bool, reason: str).
+        Rebuilds the lookup cache once per scan cycle (every 60s max).
+        """
+        now = datetime.now(timezone.utc)
+        if self._rr_blocker_cache_ts is None or (now - self._rr_blocker_cache_ts).total_seconds() > 120:
+            self._rr_blocker_cache = self._build_rr_blocker_cache()
+            self._rr_blocker_cache_ts = now
+
+        key = f"{symbol.upper()}|{session.upper()}"
+        entry = self._rr_blocker_cache.get(key)
+        if entry is None:
+            return False, ""
+        trades = entry["trades"]
+        rr = entry["rr"]
+        if trades >= self.rr_blocker_min_trades and rr < 0:
+            return True, f"cumulative R:R={rr:+.2f} over {trades} trades"
+        return False, ""
+
+    def _build_rr_blocker_cache(self) -> Dict[str, Any]:
+        """
+        Scan trades.jsonl for CLOSED outcomes and accumulate wins/losses
+        per symbol+session.  Uses the trade's timestamp to derive session.
+        """
+        cache: Dict[str, dict] = {}
+        log_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "logs", "trades.jsonl"
+        )
+        if not os.path.exists(log_path):
+            return cache
+        try:
+            with open(log_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if rec.get("status") != "CLOSED" and rec.get("direction") != "CLOSE":
+                        continue
+                    sym = (rec.get("symbol") or "").upper()
+                    profit = rec.get("profit")
+                    if profit is None:
+                        continue
+                    profit = float(profit)
+                    ts_str = rec.get("timestamp")
+                    session = self._derive_session_from_timestamp(ts_str)
+                    if not session:
+                        continue
+                    key = f"{sym}|{session}"
+                    if key not in cache:
+                        cache[key] = {"trades": 0, "total_win": 0.0, "total_loss": 0.0, "rr": 0.0}
+                    bucket = cache[key]
+                    bucket["trades"] += 1
+                    if profit > 0:
+                        bucket["total_win"] += profit
+                    else:
+                        bucket["total_loss"] += abs(profit)
+            for bucket in cache.values():
+                tw = bucket["total_win"]
+                tl = bucket["total_loss"]
+                bucket["rr"] = (tw / tl) if tl > 0 else (999.0 if tw > 0 else 0.0)
+                bucket["rr"] = round(bucket["rr"] - 1.0, 4)
+        except Exception:
+            pass
+        return cache
+
+    @staticmethod
+    def _derive_session_from_timestamp(ts_str: str) -> str:
+        if not ts_str:
+            return ""
+        try:
+            dt = datetime.fromisoformat(ts_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            hour = dt.astimezone(timezone.utc).hour
+            weekday = dt.astimezone(timezone.utc).weekday()
+            if weekday >= 5:
+                return "WEEKEND"
+            if 7 <= hour < 13:
+                return "LONDON"
+            elif 13 <= hour < 21:
+                return "NEW_YORK"
+            else:
+                return "TOKYO"
+        except Exception:
+            return ""
 
     def _compute_governance_targets(self, count: int) -> Dict[str, Any]:
         """Compute governed training targets based on trade count."""

@@ -4,7 +4,7 @@
 # =============================================================================
 
 # --- Engine Settings ---
-rules_version_id: "RT_RULES_v1_5_0"   # Bump when settings change — tracked in trade records + RF data
+rules_version_id: "RT_RULES_v1_6_0"   # Bump when settings change — tracked in trade records + RF data
 scan_interval: 60          # Seconds between scans
 timeframe: "H1"           # M1, M5, M15, M30, H1, H4, D1
 candle_history: 300        # Candles to load for analysis
@@ -177,14 +177,29 @@ ai:
   gpt_scale_max_risk_scale: 1.1  # Guardrail cap during scale phase
   gpt_deploy_mode: "decide"     # GPT makes the call at deploy
 
-# --- Scanner Integration ---
-# Integrates Rebel Intelligent Scanner with the engine
-# Scanner can STILL run standalone: python Python/Rebel_Intelligent_Scanner.py
+# --- Scanner Integration (Bridge — old, disabled) ---
 scanner:
-  enabled: false            # Scanner runs standalone (bridge disabled)
-  use_for_signals: true     # Use scanner signals instead of built-in
-  use_aim: true             # Use Rebel AIM for AI analysis
-  min_confidence: 60        # Minimum confidence to consider trading
+  enabled: false
+  use_for_signals: true
+  use_aim: true
+  min_confidence: 60
+
+# --- Intelligent Scanner (Confidence Gate Layer) ---
+# Uses Trader's own Scanner/ copy as a second opinion on every signal.
+# Standalone copy at Rebel intelligent Scanner/ is untouched.
+intelligent_scanner:
+  enabled: true
+  min_confidence: 65        # Global fallback minimum
+  session_confidence:
+    LONDON: 65
+    NEW_YORK: 75
+    TOKYO: 70
+
+# --- R:R Blocker (per symbol + session) ---
+# After min_trades closed trades, if cumulative R:R < 0 → block that combo
+rr_blocker:
+  enabled: true
+  min_trades: 30
 
 # --- Scoring Settings ---
 scoring:
