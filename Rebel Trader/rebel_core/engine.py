@@ -571,6 +571,7 @@ class RebelEngine:
                             "risk_scale": 1.0,
                             "reasoning": "AI veto: HOLD"
                         }
+                        self._log_veto_block(symbol, group, score, ai_decision)
                     else:
                         decision = self._score_based_decision(indicators, score_data)
                     veto_scale = float(ai_cfg.get("gpt_veto_risk_scale", 0.5))
@@ -1436,6 +1437,33 @@ class RebelEngine:
                 f.write(json.dumps(record) + "\n")
         except Exception as e:
             print(f"  [SHADOW LOG] Write error: {e}")
+
+    def _log_veto_block(
+        self, symbol: str, group: str, score: int, gpt_decision: Dict[str, Any]
+    ) -> None:
+        """Persist GPT veto blocks to veto_log.jsonl for review."""
+        try:
+            veto_log = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "logs", "veto_log.jsonl"
+            )
+            gov = self.governance_state or {}
+            record = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "symbol": symbol,
+                "group": group,
+                "score": score,
+                "gpt_confidence": gpt_decision.get("confidence", 0),
+                "gpt_reasoning": (gpt_decision.get("reasoning") or "")[:200],
+                "governed_count": int(gov.get("governance_trade_count", 0) or 0),
+                "session": get_current_session(),
+                "rules_version_id": self.rules_version_id,
+            }
+            os.makedirs(os.path.dirname(veto_log), exist_ok=True)
+            with open(veto_log, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record) + "\n")
+        except Exception:
+            pass
 
     # --- RF Feature columns (order matters — keep in sync with header) ---
     RF_COLUMNS = [

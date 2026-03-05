@@ -1,173 +1,121 @@
 """
 GPT Veto Phase Review
-Shows what GPT actually did since veto went live (governed_count >= 1250).
+Analyzes trades that went through during the veto phase (decision_source=GPT_ASSIST)
+and reads the veto_log.jsonl for blocked trades (if available).
 """
 import json
 import os
-from datetime import datetime
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), "..", "logs")
-SHADOW_PATH = os.path.join(LOG_DIR, "gpt_shadow_log.jsonl")
 TRADES_PATH = os.path.join(LOG_DIR, "trades.jsonl")
+VETO_LOG_PATH = os.path.join(LOG_DIR, "veto_log.jsonl")
+SHADOW_PATH = os.path.join(LOG_DIR, "gpt_shadow_log.jsonl")
 
-VETO_START = 1250
+# --- Find the timestamp when veto started (governed_count ~ 1250) ---
+veto_start_ts = None
+if os.path.exists(SHADOW_PATH):
+    last_shadow_ts = None
+    with open(SHADOW_PATH, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                gc = int(rec.get("governed_count", 0) or 0)
+                if gc >= 1245 and veto_start_ts is None:
+                    veto_start_ts = rec.get("ts")
+                last_shadow_ts = rec.get("ts")
+            except Exception:
+                continue
+    if not veto_start_ts and last_shadow_ts:
+        veto_start_ts = last_shadow_ts
 
-shadow = []
-with open(SHADOW_PATH, "r") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        rec = json.loads(line)
-        if int(rec.get("governed_count", 0) or 0) >= VETO_START:
-            shadow.append(rec)
-
-trades = []
+# --- Load all trades ---
+all_trades = []
 with open(TRADES_PATH, "r") as f:
     for line in f:
         line = line.strip()
         if not line:
             continue
-        trades.append(json.loads(line))
+        try:
+            all_trades.append(json.loads(line))
+        except Exception:
+            continue
 
-closed_trades = [t for t in trades if t.get("status") == "CLOSED" or t.get("direction") == "CLOSE"]
-open_trades = [t for t in trades if t.get("direction") not in ("CLOSE",) and t.get("status") != "CLOSED"]
+# --- Split into veto-phase trades ---
+veto_allowed = []
+veto_closed = []
+all_closed_veto = []
 
-veto_phase_trades = []
-for t in trades:
+from datetime import datetime
+
+for t in all_trades:
     tags = t.get("tags", {}) or {}
     ds = t.get("decision_source") or tags.get("decision_source", "")
-    if ds in ("GPT_ASSIST", "GPT_PRIMARY"):
-        veto_phase_trades.append(t)
 
-total_shadow = len(shadow)
-gpt_hold = [r for r in shadow if r.get("gpt_direction", "").upper() == "HOLD"]
-gpt_trade = [r for r in shadow if r.get("gpt_direction", "").upper() != "HOLD"]
-rules_trade = [r for r in shadow if r.get("rules_direction", "").upper() != "HOLD"]
-rules_hold = [r for r in shadow if r.get("rules_direction", "").upper() == "HOLD"]
+    is_veto_phase = ds == "GPT_ASSIST"
 
-vetoed = [r for r in shadow if r.get("gpt_direction", "").upper() == "HOLD"
-          and r.get("rules_direction", "").upper() != "HOLD"]
-allowed = [r for r in shadow if r.get("gpt_direction", "").upper() != "HOLD"
-           and r.get("rules_direction", "").upper() != "HOLD"]
+    if not is_veto_phase and veto_start_ts:
+        t_ts = t.get("timestamp", "")
+        try:
+            t_dt = datetime.fromisoformat(t_ts)
+            v_dt = datetime.fromisoformat(veto_start_ts)
+            if t_dt >= v_dt:
+                is_veto_phase = True
+        except Exception:
+            pass
 
-print("=" * 70)
-print("  GPT VETO PHASE REVIEW (governed_count >= 1250)")
-print("=" * 70)
-
-if shadow:
-    ts_min = shadow[0].get("ts", "?")[:19]
-    ts_max = shadow[-1].get("ts", "?")[:19]
-    print(f"  Period: {ts_min} to {ts_max}")
-
-print(f"  Total signals evaluated by GPT: {total_shadow}")
-print(f"  GPT said HOLD (veto):  {len(gpt_hold)}")
-print(f"  GPT said TRADE:        {len(gpt_trade)}")
-print(f"  Rules wanted to trade: {len(rules_trade)}")
-
-print(f"\n  ACTUAL VETOES (Rules wanted trade, GPT blocked): {len(vetoed)}")
-print(f"  ALLOWED trades (both agreed to trade):           {len(allowed)}")
-
-if total_shadow:
-    print(f"  Veto rate on tradeable signals: {len(vetoed)}/{len(rules_trade)} "
-          f"({len(vetoed)/max(len(rules_trade),1)*100:.1f}%)")
-
-# Match vetoed signals to closed trades to see what would have happened
-print("\n" + "=" * 70)
-print("  VETOED SIGNALS — WHAT WOULD HAVE HAPPENED")
-print("=" * 70)
-
-vetoed_match_wins = 0
-vetoed_match_losses = 0
-vetoed_match_pl = 0.0
-vetoed_unmatched = 0
-
-for v in vetoed:
-    sym = v.get("symbol", "")
-    v_ts = v.get("ts", "")
-    try:
-        v_dt = datetime.fromisoformat(v_ts)
-    except Exception:
+    if not is_veto_phase:
         continue
 
-    best_match = None
-    best_delta = 9999999
-    for t in closed_trades:
-        if (t.get("symbol") or "") != sym:
-            continue
-        t_ts = t.get("timestamp", "")
-        try:
-            t_dt = datetime.fromisoformat(t_ts)
-        except Exception:
-            continue
-        delta = abs((t_dt - v_dt).total_seconds())
-        if delta < best_delta and delta < 600:
-            best_delta = delta
-            best_match = t
+    direction = t.get("direction", "")
+    status = t.get("status", "")
 
-    if best_match:
-        profit = float(best_match.get("profit", 0) or 0)
-        vetoed_match_pl += profit
-        if profit > 0:
-            vetoed_match_wins += 1
-        else:
-            vetoed_match_losses += 1
-    else:
-        vetoed_unmatched += 1
+    if status == "CLOSED" or direction == "CLOSE":
+        all_closed_veto.append(t)
+    elif direction in ("BUY", "SELL"):
+        veto_allowed.append(t)
 
-matched = vetoed_match_wins + vetoed_match_losses
-print(f"  Matched to closed trades: {matched}")
-print(f"  Unmatched (no outcome):   {vetoed_unmatched}")
-if matched:
-    wr = vetoed_match_wins / matched * 100
-    print(f"  Wins: {vetoed_match_wins}  Losses: {vetoed_match_losses}  WR: {wr:.1f}%")
-    print(f"  Hypothetical P/L of blocked trades: ${vetoed_match_pl:+.2f}")
-    if vetoed_match_pl < 0:
-        print(f"  >> GPT SAVED ${abs(vetoed_match_pl):.2f} by blocking these trades")
-    else:
-        print(f"  >> GPT cost ${vetoed_match_pl:.2f} by blocking winners")
-
-# Allowed trades that actually closed — how did they do
-print("\n" + "=" * 70)
-print("  ALLOWED TRADES — ACTUAL OUTCOMES")
-print("=" * 70)
-
-veto_phase_closed = []
-for t in closed_trades:
-    tags = t.get("tags", {}) or {}
-    ds = t.get("decision_source") or tags.get("decision_source", "")
-    if ds == "GPT_ASSIST":
-        veto_phase_closed.append(t)
-
-if not veto_phase_closed:
-    veto_closed_count = 0
-    for t in closed_trades:
-        t_ts = t.get("timestamp", "")
-        try:
-            t_dt = datetime.fromisoformat(t_ts)
-        except Exception:
-            continue
-        if shadow:
+# --- Load veto block log (new feature) ---
+veto_blocks = []
+if os.path.exists(VETO_LOG_PATH):
+    with open(VETO_LOG_PATH, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
             try:
-                start_dt = datetime.fromisoformat(shadow[0].get("ts", ""))
-                if t_dt >= start_dt:
-                    veto_phase_closed.append(t)
+                veto_blocks.append(json.loads(line))
             except Exception:
                 continue
 
-wins = [t for t in veto_phase_closed if float(t.get("profit", 0) or 0) > 0]
-losses = [t for t in veto_phase_closed if float(t.get("profit", 0) or 0) <= 0]
-total_pl = sum(float(t.get("profit", 0) or 0) for t in veto_phase_closed)
-total_win = sum(float(t.get("profit", 0) or 0) for t in wins)
-total_loss = sum(float(t.get("profit", 0) or 0) for t in losses)
+# --- Print report ---
+print("=" * 70)
+print("  GPT VETO PHASE REVIEW")
+print("=" * 70)
+if veto_start_ts:
+    print(f"  Veto active since: {veto_start_ts[:19]}")
+print(f"  Trades opened during veto phase: {len(veto_allowed)}")
+print(f"  Trades closed during veto phase: {len(all_closed_veto)}")
+print(f"  Vetoed (blocked) trades logged:  {len(veto_blocks)}")
 
-print(f"  Closed trades during veto phase: {len(veto_phase_closed)}")
-print(f"  Wins: {len(wins)}  Losses: {len(losses)}")
-if veto_phase_closed:
-    wr = len(wins) / len(veto_phase_closed) * 100
+# --- Closed trade stats ---
+if all_closed_veto:
+    wins = [t for t in all_closed_veto if float(t.get("profit", 0) or 0) > 0]
+    losses = [t for t in all_closed_veto if float(t.get("profit", 0) or 0) <= 0]
+    total_pl = sum(float(t.get("profit", 0) or 0) for t in all_closed_veto)
+    total_win = sum(float(t.get("profit", 0) or 0) for t in wins)
+    total_loss = sum(float(t.get("profit", 0) or 0) for t in losses)
+
+    print(f"\n  {'='*60}")
+    print(f"  ALLOWED TRADES — CLOSED OUTCOMES")
+    print(f"  {'='*60}")
+    print(f"  Wins: {len(wins)}  Losses: {len(losses)}")
+    wr = len(wins) / len(all_closed_veto) * 100
     print(f"  Win Rate: {wr:.1f}%")
     print(f"  Total P/L: ${total_pl:+.2f}")
-    print(f"  Total Wins: ${total_win:+.2f}  Total Losses: ${total_loss:+.2f}")
+    print(f"  Wins Total: ${total_win:+.2f}  Losses Total: ${total_loss:+.2f}")
     if total_loss != 0:
         rr = abs(total_win / total_loss)
         print(f"  R:R Ratio: {rr:.2f}")
@@ -176,48 +124,61 @@ if veto_phase_closed:
     if losses:
         print(f"  Avg Loss: ${total_loss/len(losses):+.2f}")
 
-# By group
-print("\n" + "=" * 70)
-print("  VETOED BY GROUP")
-print("=" * 70)
-print(f"  {'GROUP':<12} {'VETOED':>7} {'REASON SAMPLE'}")
-print("-" * 70)
+    # By group
+    print(f"\n  {'='*60}")
+    print(f"  BY GROUP")
+    print(f"  {'='*60}")
+    print(f"  {'GROUP':<12} {'TRADES':>7} {'WINS':>6} {'LOSSES':>7} {'WR%':>6} {'P/L':>10}")
+    print(f"  {'-'*55}")
 
-veto_groups = {}
-for v in vetoed:
-    g = v.get("group", "unknown")
-    if g not in veto_groups:
-        veto_groups[g] = {"count": 0, "reasons": []}
-    veto_groups[g]["count"] += 1
-    reason = v.get("gpt_reasoning", "")[:60]
-    if reason and len(veto_groups[g]["reasons"]) < 2:
-        veto_groups[g]["reasons"].append(reason)
+    groups = {}
+    for t in all_closed_veto:
+        g = (t.get("group") or "unknown").lower()
+        if g not in groups:
+            groups[g] = {"trades": 0, "wins": 0, "losses": 0, "pl": 0.0}
+        groups[g]["trades"] += 1
+        p = float(t.get("profit", 0) or 0)
+        groups[g]["pl"] += p
+        if p > 0:
+            groups[g]["wins"] += 1
+        else:
+            groups[g]["losses"] += 1
 
-for g in sorted(veto_groups, key=lambda x: veto_groups[x]["count"], reverse=True):
-    d = veto_groups[g]
-    reason_str = d["reasons"][0] if d["reasons"] else ""
-    print(f"  {g:<12} {d['count']:>7}  {reason_str}")
+    for g in sorted(groups, key=lambda x: groups[x]["pl"], reverse=True):
+        d = groups[g]
+        wr = d["wins"] / d["trades"] * 100 if d["trades"] else 0
+        print(f"  {g:<12} {d['trades']:>7} {d['wins']:>6} {d['losses']:>7} {wr:>5.1f}% {d['pl']:>+10.2f}")
 
-# By symbol
-print("\n" + "=" * 70)
-print("  VETOED BY SYMBOL (top 15)")
-print("=" * 70)
-print(f"  {'SYMBOL':<14} {'VETOED':>7} {'GPT_CONF':>9}")
-print("-" * 70)
+# --- Veto blocks ---
+if veto_blocks:
+    print(f"\n  {'='*60}")
+    print(f"  BLOCKED TRADES (GPT VETOES)")
+    print(f"  {'='*60}")
+    print(f"  Total blocked: {len(veto_blocks)}")
 
-veto_syms = {}
-for v in vetoed:
-    s = v.get("symbol", "unknown")
-    if s not in veto_syms:
-        veto_syms[s] = {"count": 0, "confs": []}
-    veto_syms[s]["count"] += 1
-    c = v.get("gpt_confidence", 0)
-    if c:
-        veto_syms[s]["confs"].append(c)
+    vg = {}
+    for v in veto_blocks:
+        g = v.get("group", "unknown")
+        if g not in vg:
+            vg[g] = 0
+        vg[g] += 1
 
-for s in sorted(veto_syms, key=lambda x: veto_syms[x]["count"], reverse=True)[:15]:
-    d = veto_syms[s]
-    avg_conf = sum(d["confs"]) / len(d["confs"]) if d["confs"] else 0
-    print(f"  {s:<14} {d['count']:>7}   avg {avg_conf:.0f}%")
+    print(f"\n  By group:")
+    for g in sorted(vg, key=lambda x: vg[x], reverse=True):
+        print(f"    {g:<12} {vg[g]:>5} blocked")
 
-print("\n" + "=" * 70)
+    vs = {}
+    for v in veto_blocks:
+        s = v.get("symbol", "unknown")
+        if s not in vs:
+            vs[s] = 0
+        vs[s] += 1
+
+    print(f"\n  By symbol (top 10):")
+    for s in sorted(vs, key=lambda x: vs[x], reverse=True)[:10]:
+        print(f"    {s:<14} {vs[s]:>5} blocked")
+else:
+    print(f"\n  [NOTE] No veto block log found yet.")
+    print(f"  Veto blocks will be logged going forward (veto_log.jsonl).")
+
+print(f"\n{'='*70}")
