@@ -4,7 +4,7 @@
 # =============================================================================
 
 # --- Engine Settings ---
-rules_version_id: "RT_RULES_v1_6_0"   # Bump when settings change — tracked in trade records + RF data
+rules_version_id: "RT_RULES_v1_7_0"   # Bump when settings change — tracked in trade records + RF data
 scan_interval: 60          # Seconds between scans
 timeframe: "H1"           # M1, M5, M15, M30, H1, H4, D1
 candle_history: 300        # Candles to load for analysis
@@ -260,6 +260,29 @@ scoring:
     softs: 50
     crypto: 50
 
+  # Per-symbol scoring overrides (priority over group settings)
+  symbol_overrides:
+    NAS100.fs:
+      adx_min: 35
+      rsi_long_min: 70
+      rsi_short_max: 30
+    USTECH:
+      adx_min: 35
+      rsi_long_min: 70
+      rsi_short_max: 30
+    US30:
+      adx_min: 35
+      rsi_long_min: 70
+      rsi_short_max: 30
+    US500:
+      adx_min: 35
+      rsi_long_min: 70
+      rsi_short_max: 30
+    US2000:
+      adx_min: 35
+      rsi_long_min: 70
+      rsi_short_max: 30
+
   # Group-specific confidence thresholds (override default)
   confidence_thresholds:
     majors: 75
@@ -358,10 +381,6 @@ profit_lock:
   
   # R-based ladder: When profit reaches trigger_r * R, lock at lock_r * R
   profit_ladder_r:
-    - trigger_r: 0.50
-      lock_r: 0.20
-    - trigger_r: 0.80
-      lock_r: 0.35
     - trigger_r: 1.20
       lock_r: 0.60
     - trigger_r: 1.80
@@ -373,6 +392,12 @@ profit_lock:
     lock_r: 0.20
     disallow_breakeven: true
     min_r_before_lock: 0.50
+
+# --- Loss Cooldown ---
+cooldown:
+  enabled: true
+  after_loss_seconds: 180           # 3 minutes pause after a loss
+  after_consecutive_loss_seconds: 300  # 5 minutes pause on back-to-back losses
 
 # --- SL/TP Defaults (ATR multipliers) ---
 sl_tp:

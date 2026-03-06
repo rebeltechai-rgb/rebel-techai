@@ -118,6 +118,15 @@ class RebelEngine:
         self._rr_blocker_cache = {}
         self._rr_blocker_cache_ts = None
 
+        # Loss cooldown state
+        cooldown_cfg = self.config.get("cooldown", {})
+        self._cooldown_enabled = bool(cooldown_cfg.get("enabled", False))
+        self._cooldown_after_loss = int(cooldown_cfg.get("after_loss_seconds", 180))
+        self._cooldown_after_consec = int(cooldown_cfg.get("after_consecutive_loss_seconds", 300))
+        self._cooldown_until = None
+        self._consecutive_losses = 0
+        self._last_processed_deal_time = None
+
         # Build symbol list
         self.symbols = self._build_symbol_list()
         self.executor.set_family_groups(self.config.get('enabled_groups', []))
@@ -151,6 +160,8 @@ class RebelEngine:
         print(f"Scanner: {is_label}")
         if self.rr_blocker_enabled:
             print(f"R:R Blocker: ACTIVE (min_trades={self.rr_blocker_min_trades})")
+        if self._cooldown_enabled:
+            print(f"Loss Cooldown: ACTIVE ({self._cooldown_after_loss}s / {self._cooldown_after_consec}s consecutive)")
         print(f"Dry Run: {self.config.get('execution', {}).get('dry_run', False)}")
         print(f"{'='*60}\n")
     
@@ -439,6 +450,17 @@ class RebelEngine:
         risk_status = self.risk_manager.get_risk_status(positions, account)
         print(f"Risk Level: {risk_status['risk_level']} | Drawdown: {risk_status['drawdown']:.2f}%")
         
+        # Loss cooldown — pause new trades after recent losses
+        if self._cooldown_enabled:
+            self._update_loss_cooldown()
+            if self._cooldown_until:
+                now_utc = datetime.now(timezone.utc)
+                if now_utc < self._cooldown_until:
+                    remaining = int((self._cooldown_until - now_utc).total_seconds())
+                    print(f"[COOLDOWN] Paused for {remaining}s (consecutive losses: {self._consecutive_losses})")
+                    print(f"\nCycle completed in {(datetime.now(timezone.utc) - cycle_start).total_seconds():.1f}s")
+                    return
+
         # Scan each symbol
         signals = []
         
@@ -488,7 +510,7 @@ class RebelEngine:
         # Compute indicators
         indicators = compute_all_indicators(df)
         adx = indicators.get('adx14', 0)
-        adx_min = self._get_group_adx_min(group)
+        adx_min = self._get_group_adx_min(group, symbol)
         
         # Score the signal
         score_data = self.scorer.score_signal(indicators)
@@ -516,7 +538,7 @@ class RebelEngine:
                 "reasoning": f"ADX {adx:.1f} below min {adx_min}"
             }
         # Enforce per-group RSI filter
-        elif self._rsi_filtered(group, indicators):
+        elif self._rsi_filtered(group, indicators, symbol):
             rsi = indicators.get('rsi14', 0)
             decision = {
                 "direction": "HOLD",
@@ -840,7 +862,7 @@ class RebelEngine:
         atr = indicators.get('atr', 0)
         close = indicators.get('current_price', 0)
         adx = indicators.get('adx', 0)
-        adx_min = self._get_group_adx_min(group)
+        adx_min = self._get_group_adx_min(group, symbol)
 
         if adx and adx < adx_min:
             print(f"  [--] {symbol} [{group}]: ADX {adx:.1f} < {adx_min} (min)")
@@ -1133,24 +1155,40 @@ class RebelEngine:
         stage_min = self._get_governed_min_for_group(group, base)
         return max(base, stage_min) if isinstance(stage_min, int) else base
 
-    def _get_group_adx_min(self, group: str) -> int:
-        """Get the minimum ADX required for a group."""
+    def _get_group_adx_min(self, group: str, symbol: str = "") -> int:
+        """Get the minimum ADX required, checking per-symbol overrides first."""
         scoring_config = self.config.get('scoring', {})
+        if symbol:
+            sym_overrides = scoring_config.get('symbol_overrides', {})
+            sym_cfg = sym_overrides.get(symbol) or sym_overrides.get(symbol.upper())
+            if sym_cfg and 'adx_min' in sym_cfg:
+                return int(sym_cfg['adx_min'])
         group_adx = scoring_config.get('adx_min_by_group', {})
         default_adx = scoring_config.get('adx_min', 20)
         return int(group_adx.get(group, default_adx))
 
-    def _rsi_filtered(self, group: str, indicators: Dict[str, Any]) -> bool:
-        """Check if RSI is outside the allowed range for this group. Returns True if filtered out."""
+    def _rsi_filtered(self, group: str, indicators: Dict[str, Any], symbol: str = "") -> bool:
+        """Check if RSI is outside the allowed range. Per-symbol overrides checked first."""
         scoring_config = self.config.get('scoring', {})
-        rsi_filters = scoring_config.get('rsi_filter_by_group', {})
-        group_filter = rsi_filters.get(group)
-        if not group_filter:
-            return False
+        long_min = None
+        short_max = None
+        if symbol:
+            sym_overrides = scoring_config.get('symbol_overrides', {})
+            sym_cfg = sym_overrides.get(symbol) or sym_overrides.get(symbol.upper())
+            if sym_cfg:
+                long_min = sym_cfg.get('rsi_long_min')
+                short_max = sym_cfg.get('rsi_short_max')
+        if long_min is None or short_max is None:
+            rsi_filters = scoring_config.get('rsi_filter_by_group', {})
+            group_filter = rsi_filters.get(group)
+            if not group_filter:
+                return False
+            if long_min is None:
+                long_min = group_filter.get('long_min', 0)
+            if short_max is None:
+                short_max = group_filter.get('short_max', 100)
         rsi = indicators.get('rsi14', 50)
         direction = indicators.get('trend_direction', '')
-        long_min = group_filter.get('long_min', 0)
-        short_max = group_filter.get('short_max', 100)
         if direction in ('BUY', 'BULLISH', 'UP') and rsi < long_min:
             return True
         if direction in ('SELL', 'BEARISH', 'DOWN') and rsi > short_max:
@@ -1268,6 +1306,65 @@ class RebelEngine:
                 return "TOKYO"
         except Exception:
             return ""
+
+    # ------------------------------------------------------------------
+    # LOSS COOLDOWN — pause new trades after a loss / consecutive losses
+    # ------------------------------------------------------------------
+
+    def _update_loss_cooldown(self) -> None:
+        """Query MT5 for recent closed deals and set cooldown on losses."""
+        if not self._cooldown_enabled:
+            return
+        if not self._init_mt5_with_retry(max_retries=2, retry_delay=1):
+            return
+        try:
+            now = datetime.now()
+            from_time = now - timedelta(minutes=10)
+            deals = mt5.history_deals_get(from_time, now)
+            if not deals:
+                return
+
+            exits = [d for d in deals if d.entry == 1]
+            if not exits:
+                return
+            exits.sort(key=lambda d: d.time, reverse=True)
+            latest = exits[0]
+            latest_time = datetime.fromtimestamp(latest.time, tz=timezone.utc)
+
+            if self._last_processed_deal_time and latest_time <= self._last_processed_deal_time:
+                return
+
+            self._last_processed_deal_time = latest_time
+            profit = latest.profit + latest.swap + latest.commission
+
+            if profit >= 0:
+                self._consecutive_losses = 0
+                return
+
+            if len(exits) >= 2:
+                prev_profit = exits[1].profit + exits[1].swap + exits[1].commission
+                if prev_profit < 0:
+                    self._consecutive_losses = max(self._consecutive_losses + 1, 2)
+                else:
+                    self._consecutive_losses = 1
+            else:
+                self._consecutive_losses = 1
+
+            if self._consecutive_losses >= 2:
+                secs = self._cooldown_after_consec
+                self._cooldown_until = latest_time + timedelta(seconds=secs)
+                print(f"[COOLDOWN] Consecutive losses ({self._consecutive_losses}) — paused {secs}s")
+            else:
+                secs = self._cooldown_after_loss
+                self._cooldown_until = latest_time + timedelta(seconds=secs)
+                print(f"[COOLDOWN] Loss detected — paused {secs}s")
+        except Exception as e:
+            print(f"[COOLDOWN] Error checking deals: {e}")
+        finally:
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
 
     def _compute_governance_targets(self, count: int) -> Dict[str, Any]:
         """Compute governed training targets based on trade count."""
