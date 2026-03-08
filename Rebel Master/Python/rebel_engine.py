@@ -86,9 +86,10 @@ class RebelEngine:
         self.history_bars = int(self.scanner_config.get("history_bars", 200))
         self.timeframe = self._resolve_timeframe(self.scanner_config.get("timeframe", "H1"))
 
-        # Intelligent Scanner (confidence layer)
+        # Intelligent Scanner (primary signal source or confidence gate)
         is_cfg = self.config.get("intelligent_scanner", {}) or {}
         self.intelligent_scanner_enabled = bool(is_cfg.get("enabled", False)) and HAS_INTELLIGENT_SCANNER
+        self._scanner_primary = bool(is_cfg.get("primary", False)) and self.intelligent_scanner_enabled
         self.intelligent_scanner = None
         self.scanner_confidence_thresholds = is_cfg.get("confidence_thresholds", {})
         self.scanner_global_min_conf = int(is_cfg.get("min_confidence", 65))
@@ -97,10 +98,12 @@ class RebelEngine:
                 self.intelligent_scanner = RebelIntelligentScanner(self.config)
                 self.intelligent_scanner.adapter._connected = True
                 self.intelligent_scanner.connected = True
-                print(f"[SCANNER] Intelligent Scanner ACTIVE (mode={is_cfg.get('mode', 'ta_only')}, min_conf={self.scanner_global_min_conf}%)")
+                label = "PRIMARY signal source" if self._scanner_primary else f"confidence gate"
+                print(f"[SCANNER] Intelligent Scanner ACTIVE - {label} (mode={is_cfg.get('mode', 'ta_only')}, min_conf={self.scanner_global_min_conf}%)")
             except Exception as e:
                 print(f"[SCANNER] Failed to initialize Intelligent Scanner: {e}")
                 self.intelligent_scanner_enabled = False
+                self._scanner_primary = False
 
         # Core validation progress (closed trades)
         core_cfg = self.config.get("core_validation", {}) or {}
@@ -634,6 +637,102 @@ class RebelEngine:
         # Default to forex
         return "forex"
     
+    def _scanner_primary_scan(self, scanner) -> list:
+        """Use the Intelligent Scanner as primary signal source instead of RebelScanner."""
+        signals = []
+
+        if not self._scanner_primary or not self.intelligent_scanner:
+            return signals
+
+        valid_symbols = scanner.get_valid_symbols() if hasattr(scanner, 'get_valid_symbols') else []
+        if not valid_symbols:
+            return signals
+
+        blocklist = set()
+        if self.filter_skip_enabled:
+            blocklist |= self._get_filter_skip_blocklist()
+        if self.symbol_purge_enabled:
+            blocklist |= self._get_symbol_purge_blocklist()
+        filtered = [s for s in valid_symbols if s not in blocklist]
+
+        print(f"[SCANNER:PRIMARY] Scanning {len(filtered)} symbols (MTF: M5/M15/H1)...")
+
+        for symbol in filtered:
+            try:
+                scan_result = self.intelligent_scanner.scan_symbol(symbol)
+                if not scan_result:
+                    continue
+
+                direction = scan_result.get("direction")
+                confidence = scan_result.get("final_confidence", 0)
+                trade_levels = scan_result.get("trade_levels", {})
+
+                if not direction:
+                    continue
+
+                # Confidence threshold
+                min_conf = self._get_scanner_confidence_min(symbol)
+                if confidence < min_conf:
+                    continue
+
+                # Build signal in same format as RebelScanner
+                adx = scan_result.get("trend", {}).get("adx", 0)
+                rsi = scan_result.get("momentum", {}).get("rsi", 0)
+                atr = scan_result.get("volatility", {}).get("atr", 0)
+                trend_overall = scan_result.get("trend", {}).get("overall", "unknown")
+
+                # Map scanner direction to engine format
+                if direction == "long":
+                    engine_dir = "long"
+                elif direction == "short":
+                    engine_dir = "short"
+                else:
+                    continue
+
+                # Map confidence to 5-point score (for compatibility)
+                if confidence >= 80:
+                    score = 5
+                elif confidence >= 65:
+                    score = 4
+                elif confidence >= 50:
+                    score = 3
+                else:
+                    score = 2
+
+                signal = {
+                    "symbol": symbol,
+                    "direction": engine_dir,
+                    "score": score,
+                    "score_100": confidence,
+                    "indicators": {
+                        "ema9": None,
+                        "ema21": None,
+                        "ema50": None,
+                        "rsi": rsi,
+                        "atr": atr,
+                        "adx": adx,
+                    },
+                    "breakdown": {},
+                    "scanner_confidence": confidence,
+                    "scanner_primary": True,
+                    "trade_levels": trade_levels,
+                    "risk_valid": True,
+                    "risk_messages": [],
+                }
+
+                arrow = "[+]" if engine_dir == "long" else "[-]"
+                print(f"  {arrow} {symbol}: {engine_dir.upper()} (Conf: {confidence}%, ADX: {adx:.0f}, Trend: {trend_overall})")
+                if scan_result.get("ta_reasoning"):
+                    for reason in scan_result["ta_reasoning"][:2]:
+                        print(f"      TA: {reason}")
+
+                signals.append(signal)
+            except Exception as e:
+                print(f"  [!] {symbol}: scanner error - {str(e)[:50]}")
+
+        print(f"[SCANNER:PRIMARY] Found {len(signals)} signals.")
+        return signals
+
     def _get_scanner_confidence_min(self, symbol: str) -> int:
         """Get the minimum confidence threshold for a symbol's family."""
         group = self._get_asset_group(symbol)
@@ -1121,14 +1220,17 @@ class RebelEngine:
                     print(f"[ENGINE] Profit lock update error: {e}")
                 
                 # ---- RUN SCANNER ----
-                if hasattr(scanner, "set_symbol_blocklist"):
-                    blocklist = set()
-                    if self.filter_skip_enabled:
-                        blocklist |= self._get_filter_skip_blocklist()
-                    if self.symbol_purge_enabled:
-                        blocklist |= self._get_symbol_purge_blocklist()
-                    scanner.set_symbol_blocklist(blocklist)
-                signals = scanner.scan()
+                if self._scanner_primary and self.intelligent_scanner:
+                    signals = self._scanner_primary_scan(scanner)
+                else:
+                    if hasattr(scanner, "set_symbol_blocklist"):
+                        blocklist = set()
+                        if self.filter_skip_enabled:
+                            blocklist |= self._get_filter_skip_blocklist()
+                        if self.symbol_purge_enabled:
+                            blocklist |= self._get_symbol_purge_blocklist()
+                        scanner.set_symbol_blocklist(blocklist)
+                    signals = scanner.scan()
                 
                 if signals:
                     print(f"[ENGINE] Found {len(signals)} signal(s)")
@@ -1227,9 +1329,10 @@ class RebelEngine:
 
                             # ============================================
                             # INTELLIGENT SCANNER CONFIDENCE GATE
+                            # (Skipped when scanner is primary — already filtered)
                             # ============================================
-                            scanner_confidence = None
-                            if self.intelligent_scanner_enabled and self.intelligent_scanner:
+                            scanner_confidence = signal.get("scanner_confidence")
+                            if not signal.get("scanner_primary") and self.intelligent_scanner_enabled and self.intelligent_scanner:
                                 try:
                                     scan_result = self.intelligent_scanner.scan_symbol(symbol)
                                     if scan_result and scan_result.get("final_confidence") is not None:

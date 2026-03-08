@@ -155,6 +155,7 @@ baseline_locked:
 # ======================================================================== #
 intelligent_scanner:
   enabled: true
+  primary: true                # Scanner generates signals, not just confidence gate
   mode: "hybrid"               # ta_only | hybrid | ai_only — AI reasoning active
   use_ai: true                 # AI reasoning enabled for signal quality
   min_confidence: 65           # Global minimum confidence (0-100)
