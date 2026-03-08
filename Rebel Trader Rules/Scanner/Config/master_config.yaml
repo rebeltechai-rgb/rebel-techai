@@ -1,0 +1,37 @@
+# REBEL INTELLIGENT SCANNER - RETAIL CONFIG (SAFE TEMPLATE)
+
+mt5:
+  login: ""
+  password: ""
+  server: ""
+  # Optional: set if you want the scanner to attach to a specific terminal path
+  path: "C:/mt5_scanner_live/terminal64.exe"
+
+broker_adapter:
+  name: "mt5"
+  attach_only: true
+  mt5_path: "C:/mt5_scanner_live/terminal64.exe"
+  # module: "your_adapter_module:Adapter"
+
+intelligent_scanner:
+  enabled: true
+  timeframes: ["M5", "M15", "H1"]
+  bars: 400
+  scan_interval: 300
+  min_confidence: 75
+  mode: "hybrid"          # ta_only | ai_only | hybrid
+  market_open_max_tick_age_sec: 300  # set 0 to disable market-open filter
+  show_closed_summary: false
+  show_ta_reasoning: true
+  risk_percent: 2.0
+  sl_atr_multiplier: 2.0
+  tp_atr_multiplier: 3.0
+
+  # AI settings
+  use_ai: False
+  ai_model: "gpt-4o-mini"
+  ai_max_tokens: 512
+  openai_api_key: ""
+
+# Symbols are loaded from Config/symbol_lists.yaml by default.
+# To override, define symbols.groups here.

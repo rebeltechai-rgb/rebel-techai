@@ -1,0 +1,34 @@
+# =============================================================================
+# REBEL INTELLIGENT SCANNER — Retail Edition
+# =============================================================================
+# 1. Install MetaTrader 5 and log into your broker account
+# 2. Set the mt5.path below to your terminal64.exe location
+# 3. Run: python rebel_scanner.py
+# =============================================================================
+
+mt5:
+  login: ""                    # Leave blank to attach to open terminal
+  password: ""
+  server: ""
+  path: ""                     # Set to your MT5 terminal64.exe path
+
+broker_adapter:
+  name: "mt5"
+  attach_only: true            # Attach to already-running MT5
+
+intelligent_scanner:
+  enabled: true
+  timeframes: ["M5", "M15", "H1"]
+  bars: 400
+  scan_interval: 300           # Seconds between scans (5 min default)
+  min_confidence: 65           # Minimum confidence to show signal (0-100)
+  mode: "ta_only"
+  market_open_max_tick_age_sec: 300
+  show_closed_summary: false
+  show_ta_reasoning: true
+  risk_percent: 1.0            # Risk per trade for lot calculation
+  sl_atr_multiplier: 2.0       # Stop loss = 2x ATR
+  tp_atr_multiplier: 3.0       # Take profit = 3x ATR
+
+# Symbols loaded from Config/symbol_lists.yaml
+# Edit that file to customize your watchlist

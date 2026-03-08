@@ -1,0 +1,62 @@
+# ============================
+# REBEL M.L. CONFIGURATION
+# ============================
+
+MODEL_SETTINGS:
+  preferred_model: "gpt-4.1"
+  fallback_model: "gpt-4.1"
+  background_model: "gpt-4.1-mini"
+
+COST_LIMITS:
+  daily_usd_max: 4.00
+  monthly_usd_max: 100.00
+  reduce_pro_at_percentage: 0.80     # switch to Standard when 80% of monthly reached
+
+SYMBOL_PRIORITIES:
+  PRIORITY_1: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF", "XAUUSD", "BTCUSD", "NAS100"]
+  PRIORITY_2: ["EURJPY", "GBPJPY", "AUDJPY", "NZDJPY", "CADJPY", "EURGBP", "EURAUD", "EURNZD"]
+  PRIORITY_3: ["GBPAUD", "GBPCAD", "GBPCHF", "AUDCAD", "AUDCHF", "NZDCAD", "NZDCHF"]
+
+AI_WINDOWS:
+  XAUUSD:
+    - { start: "05:00", end: "08:00" }   # London → NY transition
+    - { start: "08:00", end: "13:00" }   # NY session
+    - { start: "13:00", end: "16:00" }   # NY close volatility
+
+  EURUSD:
+    - { start: "00:00", end: "04:00" }   # London open
+    - { start: "05:00", end: "08:00" }   # NY overlap
+
+  NAS100:
+    - { start: "06:00", end: "09:00" }   # US premarket
+    - { start: "09:30", end: "13:00" }   # Cash session
+
+  BTCUSD:
+    - { trigger_only: true }
+
+AI_TRIGGERS:
+  ema_cross: true
+  rsi_extreme: true
+  macd_cross: true
+  adx_trend: true
+  atr_spike: true
+  candle_patterns: true
+  breakout_levels: true
+
+VOLATILITY_FILTERS:
+  atr_multiplier_high: 1.8
+  atr_multiplier_extreme: 2.5
+  adx_trend_min: 22
+
+SELECT_SAFETY:
+  max_risk_per_signal: 0.03
+  block_on_news_minutes_before: 2
+  block_on_exposure_conflict: true
+  block_on_account_drawdown: 0.10
+  correlation_block: true
+
+LOGGING:
+  enable_ai_logging: true
+  log_file: "Rebel_AIM_History.log"
+  save_full_snapshots: true
+

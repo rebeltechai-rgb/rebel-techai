@@ -1,0 +1,22 @@
+# REBEL Rules-Based AI Trading System
+# Requirements
+
+# Core
+pandas>=2.0.0
+numpy>=1.24.0
+PyYAML>=6.0
+pytz>=2023.3
+
+# MetaTrader 5
+MetaTrader5>=5.0.45
+
+# AI (OpenAI)
+openai>=1.0.0
+
+# Scanner dependencies (if using integrated scanner)
+pandas_ta>=0.3.14b
+
+# Optional: Dashboard
+# rich>=13.0.0
+# textual>=0.40.0
+
