@@ -95,9 +95,10 @@ class RebelEngine:
             except Exception as e:
                 print(f"[!] Scanner Bridge not available: {e}")
         
-        # Intelligent Scanner (confidence gate layer — same pattern as Master)
+        # Intelligent Scanner (primary signal source or confidence gate)
         is_cfg = self.config.get("intelligent_scanner", {}) or {}
         self.intelligent_scanner_enabled = bool(is_cfg.get("enabled", False)) and HAS_INTELLIGENT_SCANNER
+        self._scanner_primary = bool(is_cfg.get("primary", False)) and self.intelligent_scanner_enabled
         self.intelligent_scanner = None
         self.scanner_session_confidence = is_cfg.get("session_confidence", {})
         self.scanner_global_min_conf = int(is_cfg.get("min_confidence", 65))
@@ -106,10 +107,12 @@ class RebelEngine:
                 self.intelligent_scanner = RebelIntelligentScanner(self.config)
                 self.intelligent_scanner.adapter._connected = True
                 self.intelligent_scanner.connected = True
-                print(f"[SCANNER] Intelligent Scanner ACTIVE (min_conf={self.scanner_global_min_conf}%)")
+                label = "PRIMARY signal source" if self._scanner_primary else "confidence gate"
+                print(f"[SCANNER] Intelligent Scanner ACTIVE - {label} (min_conf={self.scanner_global_min_conf}%)")
             except Exception as e:
                 print(f"[SCANNER] Failed to initialize Intelligent Scanner: {e}")
                 self.intelligent_scanner_enabled = False
+                self._scanner_primary = False
 
         # R:R Blocker state (per symbol+session cumulative R:R after N trades)
         rr_cfg = self.config.get("rr_blocker", {}) or {}
@@ -156,7 +159,14 @@ class RebelEngine:
             deploy_at = int(ai_cfg.get("gpt_deploy_start", 1750))
             print(f"GPT Shadow: ACTIVE — logging to gpt_shadow_log.jsonl")
             print(f"GPT Deploy: At {deploy_at} governed trades GPT decides on its own")
-        is_label = "Integrated" if self.scanner else ("Confidence Gate" if self.intelligent_scanner_enabled else "Standalone only")
+        if self._scanner_primary:
+            is_label = "PRIMARY (Lite Scanner + GPT veto)"
+        elif self.scanner:
+            is_label = "Integrated"
+        elif self.intelligent_scanner_enabled:
+            is_label = "Confidence Gate"
+        else:
+            is_label = "Standalone only"
         print(f"Scanner: {is_label}")
         if self.rr_blocker_enabled:
             print(f"R:R Blocker: ACTIVE (min_trades={self.rr_blocker_min_trades})")
@@ -436,12 +446,19 @@ class RebelEngine:
             if virtual_open or stats['total_trades'] > 0:
                 print(f"[DRY RUN] Virtual: {len(virtual_open)} open | "
                       f"{stats['wins']}W/{stats['losses']}L ({stats['win_rate']}%) | "
-                      f"P&L: ${stats['total_profit']:+.2f}")
+                      f"P&L: ${stats['total_profit']:+.2f} | R: {stats.get('total_r', 0):+.2f}")
                 family_stats = self.executor.get_family_stats()
                 if family_stats:
-                    summary = self._format_family_stats(family_stats)
+                    summary = self._format_family_stats_r(family_stats)
                     if summary:
                         print(f"[DRY RUN] By family: {summary}")
+                sym_r = self.executor.get_symbol_r_stats()
+                if sym_r:
+                    sym_parts = sorted(sym_r.items(), key=lambda x: x[1]["total_r"], reverse=True)
+                    sym_summary = " | ".join(
+                        f"{s}:{d['total_r']:+.1f}R({d['trades']})" for s, d in sym_parts
+                    )
+                    print(f"[DRY RUN] By symbol: {sym_summary}")
         
         # Update profit locks on existing positions
         self._update_profit_locks(positions)
@@ -463,19 +480,37 @@ class RebelEngine:
 
         # Scan each symbol
         signals = []
-        
-        for symbol, group in self.symbols.items():
-            # Check session activation (per-symbol override supported)
-            if not self._is_session_active(group, session, symbol=symbol):
-                continue
-            
-            try:
-                result = self._analyze_symbol(symbol, group, positions, account)
-                if result:
-                    signals.append(result)
-            except Exception as e:
-                print(f"  [!] {symbol}: Error - {str(e)[:50]}")
-        
+
+        # Scanner-primary: init MT5 once for all symbol scans
+        scanner_mt5_ready = False
+        if self._scanner_primary and self.intelligent_scanner:
+            scanner_mt5_ready = self._init_mt5_with_retry()
+            if not scanner_mt5_ready:
+                print("[!] MT5 init failed for scanner - skipping scan")
+
+        try:
+            for symbol, group in self.symbols.items():
+                if not self._is_session_active(group, session, symbol=symbol):
+                    continue
+
+                try:
+                    if self._scanner_primary and self.intelligent_scanner and scanner_mt5_ready:
+                        result = self._analyze_with_primary_scanner(
+                            symbol, group, session, positions, account
+                        )
+                    else:
+                        result = self._analyze_symbol(symbol, group, positions, account)
+                    if result:
+                        signals.append(result)
+                except Exception as e:
+                    print(f"  [!] {symbol}: Error - {str(e)[:50]}")
+        finally:
+            if scanner_mt5_ready:
+                try:
+                    mt5.shutdown()
+                except Exception:
+                    pass
+
         # Sort by score and show top signals
         signals.sort(key=lambda x: x.get('score', 0), reverse=True)
         
@@ -917,7 +952,184 @@ class RebelEngine:
             "risk_level": risk,
             "source": "scanner"
         }
-    
+
+    # ------------------------------------------------------------------
+    # PRIMARY SCANNER PATH — Lite Scanner drives signal generation
+    # GPT veto still applies when in veto/scale/deploy phase
+    # ------------------------------------------------------------------
+
+    def _analyze_with_primary_scanner(
+        self,
+        symbol: str,
+        group: str,
+        session: str,
+        positions: List[Dict[str, Any]],
+        account: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Analyze symbol using the Lite Scanner as primary signal source with GPT veto."""
+
+        scan_result = self.intelligent_scanner.scan_symbol(symbol)
+        if not scan_result:
+            return None
+
+        direction = scan_result.get("direction")
+        confidence = scan_result.get("final_confidence", 0)
+        trade_levels = scan_result.get("trade_levels", {})
+
+        if not direction:
+            return None
+
+        # Normalize scanner direction to engine format
+        if direction == "long":
+            direction = "BUY"
+        elif direction == "short":
+            direction = "SELL"
+        else:
+            return None
+
+        # Per-symbol ADX filter (uses scanner's computed ADX)
+        adx = scan_result.get("trend", {}).get("adx", 0)
+        adx_min = self._get_group_adx_min(group, symbol)
+        if adx > 0 and adx < adx_min:
+            return None
+
+        # Per-symbol RSI filter
+        rsi = scan_result.get("momentum", {}).get("rsi", 50)
+        scoring_config = self.config.get('scoring', {})
+        sym_overrides = scoring_config.get('symbol_overrides', {})
+        sym_cfg = sym_overrides.get(symbol) or sym_overrides.get(symbol.upper())
+        if sym_cfg:
+            long_min = sym_cfg.get('rsi_long_min')
+            short_max = sym_cfg.get('rsi_short_max')
+            if direction == "BUY" and long_min and rsi < long_min:
+                return None
+            if direction == "SELL" and short_max and rsi > short_max:
+                return None
+
+        # Session-aware confidence threshold
+        session_min_conf = self._get_scanner_session_confidence(session)
+        if confidence < session_min_conf:
+            return None
+
+        # Group confidence threshold (governed)
+        conf_min = self._get_group_confidence_min(group)
+        if confidence < conf_min:
+            return None
+
+        # R:R Blocker
+        if self.rr_blocker_enabled:
+            blocked, reason = self._check_rr_blocker(symbol, session)
+            if blocked:
+                print(f"    [RR:BLOCKED] {symbol} ({session}): {reason}")
+                return None
+
+        # Daily trade cap
+        max_daily = int(self.config.get("risk", {}).get("max_daily_trades", 20))
+        daily = self.executor.get_daily_trade_counter() if self.executor else {}
+        trades_today = int(daily.get("trades_today", 0) or 0)
+        if trades_today >= max_daily:
+            return None
+
+        # Log signal
+        trend_overall = scan_result.get("trend", {}).get("overall", "?")
+        print(f"  [OK] {symbol} [{group}]: {direction} (Conf: {confidence}%, Trend: {trend_overall}, ADX: {adx:.0f})")
+        if scan_result.get("ta_reasoning"):
+            for reason in scan_result["ta_reasoning"][:2]:
+                print(f"    TA: {reason}")
+
+        # Build decision from scanner trade levels
+        decision = {
+            "direction": direction,
+            "confidence": confidence,
+            "sl": trade_levels.get("sl"),
+            "tp": trade_levels.get("tp"),
+            "risk_scale": 1.0,
+            "reasoning": f"Scanner: {trend_overall} conf={confidence}%"
+        }
+
+        score_data = {
+            "score": confidence,
+            "direction": direction,
+            "confidence": confidence,
+            "tradeable": True,
+        }
+
+        # Build minimal indicators dict for RF feature logging
+        momentum = scan_result.get("momentum", {})
+        vol = scan_result.get("volatility", {})
+        indicators = {
+            "rsi14": momentum.get("rsi", 0),
+            "macd_histogram": momentum.get("macd_histogram", 0),
+            "atr14": vol.get("atr", 0),
+            "adx14": adx,
+            "close": trade_levels.get("entry", 0),
+        }
+
+        # ============================================
+        # GPT VETO / SCALE / DEPLOY (layered on top)
+        # ============================================
+        decision_source = "SCANNER"
+        if self.ai_brain and self.gpt_mode not in ("off", "observe"):
+            ai_cfg = self.config.get("ai", {})
+            ai_decision = self.ai_brain.make_decision(symbol, indicators, score_data)
+
+            if self.gpt_mode == "shadow":
+                print(f"    [AI:SHADOW] {symbol}: {ai_decision.get('direction')} | {ai_decision.get('reasoning', '')[:60]}")
+                self._log_shadow_decision(
+                    symbol=symbol, group=group,
+                    gpt_decision=ai_decision,
+                    rules_decision=decision,
+                    score=confidence, trade_placed=False,
+                )
+
+            elif self.gpt_mode == "veto":
+                print(f"    [AI:VETO] {symbol}: {ai_decision.get('direction')} | {ai_decision.get('reasoning', '')[:60]}")
+                if ai_decision.get("direction", "HOLD").upper() == "HOLD":
+                    self._log_veto_block(symbol, group, confidence, ai_decision)
+                    return None
+                veto_scale = float(ai_cfg.get("gpt_veto_risk_scale", 0.5))
+                decision["risk_scale"] = min(decision["risk_scale"], veto_scale)
+                decision_source = "SCANNER_GPT_VETO"
+
+            elif self.gpt_mode == "scale":
+                print(f"    [AI:SCALE] {symbol}: {ai_decision.get('direction')} | {ai_decision.get('reasoning', '')[:60]}")
+                if ai_decision.get("direction", "HOLD").upper() == "HOLD":
+                    self._log_veto_block(symbol, group, confidence, ai_decision)
+                    return None
+                scale_cap = ai_cfg.get("gpt_scale_max_risk_scale")
+                ai_risk = float(ai_decision.get("risk_scale", 1.0))
+                if isinstance(scale_cap, (int, float)):
+                    ai_risk = min(ai_risk, float(scale_cap))
+                decision["risk_scale"] = ai_risk
+                decision_source = "SCANNER_GPT_SCALE"
+
+            elif self.gpt_mode == "deploy":
+                deploy_mode = ai_cfg.get("gpt_deploy_mode", "decide")
+                if deploy_mode == "decide":
+                    if ai_decision.get("direction", "HOLD").upper() == "HOLD":
+                        return None
+                    decision["risk_scale"] = float(ai_decision.get("risk_scale", 1.0))
+                    decision_source = "SCANNER_GPT_DEPLOY"
+                else:
+                    decision_source = "SCANNER"
+
+        self._attempt_trade(
+            symbol, group, direction, decision,
+            positions, account, indicators,
+            score_data=score_data,
+            decision_source=decision_source,
+        )
+
+        return {
+            "symbol": symbol,
+            "group": group,
+            "score": confidence,
+            "direction": direction,
+            "confidence": confidence,
+            "risk_level": "NORMAL",
+            "source": "scanner_primary"
+        }
+
     def _score_based_decision(
         self,
         indicators: Dict[str, Any],
@@ -1484,6 +1696,23 @@ class RebelEngine:
             if key == "unknown" and len(family_stats) > 1:
                 continue
             parts.append(f"{key}:{stats.get('wins',0)}W/{stats.get('losses',0)}L({stats.get('win_rate',0)}%)")
+        return " | ".join(parts)
+
+    def _format_family_stats_r(self, family_stats: Dict[str, Any]) -> str:
+        """Format per-family stats with R-multiple."""
+        order = ["majors", "crosses", "metals", "indices", "energy", "softs", "crypto", "unknown"]
+        parts = []
+        for key in order:
+            if key not in family_stats:
+                continue
+            stats = family_stats[key]
+            if key == "unknown" and len(family_stats) > 1:
+                continue
+            total_r = stats.get("total_r", 0.0)
+            parts.append(
+                f"{key}:{stats.get('wins',0)}W/{stats.get('losses',0)}L "
+                f"R:{total_r:+.1f}"
+            )
         return " | ".join(parts)
 
     def _compute_setup_quality(self, score: int, confidence: int, conf_min: int) -> str:

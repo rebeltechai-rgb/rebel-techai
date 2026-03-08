@@ -155,10 +155,10 @@ baseline_locked:
 # ======================================================================== #
 intelligent_scanner:
   enabled: true
-  mode: "ta_only"              # ta_only | hybrid | ai_only (AI off for validation)
-  use_ai: false                # Keep AI off during core validation
+  mode: "hybrid"               # ta_only | hybrid | ai_only — AI reasoning active
+  use_ai: true                 # AI reasoning enabled for signal quality
   min_confidence: 65           # Global minimum confidence (0-100)
-  timeframes: ["H1"]          # H1 only — no M5/M15 interference
+  timeframes: ["M5", "M15", "H1"]   # Full multi-timeframe analysis
   bars: 400
   sl_atr_multiplier: 2.0
   tp_atr_multiplier: 3.0

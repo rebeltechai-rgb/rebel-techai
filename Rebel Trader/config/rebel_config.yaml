@@ -4,7 +4,7 @@
 # =============================================================================
 
 # --- Engine Settings ---
-rules_version_id: "RT_RULES_v1_7_0"   # Bump when settings change — tracked in trade records + RF data
+rules_version_id: "RT_RULES_v1_8_0"   # Bump when settings change — tracked in trade records + RF data
 scan_interval: 60          # Seconds between scans
 timeframe: "H1"           # M1, M5, M15, M30, H1, H4, D1
 candle_history: 300        # Candles to load for analysis
@@ -184,12 +184,15 @@ scanner:
   use_aim: true
   min_confidence: 60
 
-# --- Intelligent Scanner (Confidence Gate Layer) ---
-# Uses Trader's own Scanner/ copy as a second opinion on every signal.
-# Standalone copy at Rebel intelligent Scanner/ is untouched.
+# --- Intelligent Scanner (PRIMARY Signal Source) ---
+# Lite Scanner drives signal generation; GPT veto still active on top.
+# Standalone copy at Rebel Intelligent Scanner/ is untouched.
 intelligent_scanner:
   enabled: true
+  primary: true             # Scanner generates signals, engine applies GPT veto
   min_confidence: 65        # Global fallback minimum
+  timeframes: ["M5", "M15", "H1"]
+  bars: 400
   session_confidence:
     LONDON: 65
     NEW_YORK: 75

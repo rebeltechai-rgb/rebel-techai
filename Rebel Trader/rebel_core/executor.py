@@ -59,8 +59,9 @@ class TradeExecutor:
         # Dry run tracking
         self.virtual_positions: List[Dict[str, Any]] = []
         self.virtual_positions_file = os.path.join(self.log_dir, 'virtual_positions.json')
-        self.dry_run_stats = {"wins": 0, "losses": 0, "total_profit": 0.0}
+        self.dry_run_stats = {"wins": 0, "losses": 0, "total_profit": 0.0, "total_r": 0.0}
         self.family_stats = {}
+        self.symbol_r_stats = {}
         self.family_groups = []
         self.symbol_groups = {}
         self.deal_history_state = {}
@@ -767,22 +768,36 @@ class TradeExecutor:
                 pos["profit"] = profit
                 pos["outcome"] = outcome
                 pos["close_time"] = datetime.now(timezone.utc).isoformat()
-                
+
+                # R-multiple calculation
+                r_multiple = 0.0
+                if sl and entry_price:
+                    sl_distance = abs(entry_price - sl)
+                    if sl_distance > 0:
+                        if direction.upper() == "BUY":
+                            r_multiple = (exit_price - entry_price) / sl_distance
+                        else:
+                            r_multiple = (entry_price - exit_price) / sl_distance
+                        r_multiple = round(r_multiple, 2)
+                pos["r_multiple"] = r_multiple
+
                 # Update stats
                 if outcome == "WIN":
                     self.dry_run_stats["wins"] += 1
                 else:
                     self.dry_run_stats["losses"] += 1
                 self.dry_run_stats["total_profit"] += profit
-                self._record_trade_outcome(symbol, pos.get("comment"), profit)
-                
+                self.dry_run_stats["total_r"] = round(self.dry_run_stats.get("total_r", 0.0) + r_multiple, 2)
+                self._record_trade_outcome(symbol, pos.get("comment"), profit, r_multiple=r_multiple)
+                self._record_symbol_r(symbol, r_multiple)
+
                 # Log the outcome
                 emoji = "[WIN]" if outcome == "WIN" else "[LOSS]"
                 hit_type = "TP" if tp_hit else "SL"
                 print(f"\n{emoji} [DRY RUN] SIMULATED {outcome} on {symbol}")
-                print(f"    {hit_type} hit | Entry: {entry_price:.5f} → Exit: {exit_price:.5f}")
-                print(f"    Profit: ${profit:+.2f} | W/L: {outcome[0]}")
-                print(f"    [STATS] Running: {self.dry_run_stats['wins']}W / {self.dry_run_stats['losses']}L | Total: ${self.dry_run_stats['total_profit']:+.2f}")
+                print(f"    {hit_type} hit | Entry: {entry_price:.5f} -> Exit: {exit_price:.5f}")
+                print(f"    Profit: ${profit:+.2f} | R: {r_multiple:+.2f}R")
+                print(f"    [STATS] Running: {self.dry_run_stats['wins']}W / {self.dry_run_stats['losses']}L | P&L: ${self.dry_run_stats['total_profit']:+.2f} | Cumulative R: {self.dry_run_stats['total_r']:+.2f}R")
                 
                 # Structured log for parsing
                 log.info(f"[DRY RUN] Virtual {'TP' if tp_hit else 'SL'} hit on {symbol} | "
@@ -828,13 +843,14 @@ class TradeExecutor:
         """Get dry run performance stats."""
         total = self.dry_run_stats["wins"] + self.dry_run_stats["losses"]
         win_rate = (self.dry_run_stats["wins"] / total * 100) if total > 0 else 0
-        
+
         return {
             "wins": self.dry_run_stats["wins"],
             "losses": self.dry_run_stats["losses"],
             "total_trades": total,
             "win_rate": round(win_rate, 1),
             "total_profit": round(self.dry_run_stats["total_profit"], 2),
+            "total_r": round(self.dry_run_stats.get("total_r", 0.0), 2),
             "open_positions": len(self.get_virtual_positions())
         }
 
@@ -1259,9 +1275,10 @@ class TradeExecutor:
         comment: Optional[str],
         profit: float,
         group_override: Optional[str] = None,
-        position_id: Optional[int] = None
+        position_id: Optional[int] = None,
+        r_multiple: float = 0.0,
     ) -> None:
-        """Record win/loss by family based on trade comment or override."""
+        """Record win/loss and R-multiple by family."""
         group = group_override.lower() if group_override else self._extract_group(comment)
         if group == "unknown" and position_id is not None:
             mapped = self.position_groups.get(str(position_id))
@@ -1272,7 +1289,7 @@ class TradeExecutor:
             if mapped:
                 group = mapped
         if group not in self.family_stats:
-            self.family_stats[group] = {"wins": 0, "losses": 0, "total": 0, "win_rate": 0.0}
+            self.family_stats[group] = {"wins": 0, "losses": 0, "total": 0, "win_rate": 0.0, "total_r": 0.0}
         stats = self.family_stats[group]
         if profit > 0:
             stats["wins"] += 1
@@ -1280,7 +1297,20 @@ class TradeExecutor:
             stats["losses"] += 1
         stats["total"] = stats["wins"] + stats["losses"]
         stats["win_rate"] = round((stats["wins"] / stats["total"]) * 100, 1) if stats["total"] else 0.0
+        stats["total_r"] = round(stats.get("total_r", 0.0) + r_multiple, 2)
         self._save_trade_stats()
+
+    def _record_symbol_r(self, symbol: str, r_multiple: float) -> None:
+        """Track R-multiple per symbol."""
+        sym = symbol.upper()
+        if sym not in self.symbol_r_stats:
+            self.symbol_r_stats[sym] = {"trades": 0, "total_r": 0.0}
+        self.symbol_r_stats[sym]["trades"] += 1
+        self.symbol_r_stats[sym]["total_r"] = round(self.symbol_r_stats[sym]["total_r"] + r_multiple, 2)
+
+    def get_symbol_r_stats(self) -> Dict[str, Any]:
+        """Get R-multiple stats per symbol."""
+        return self.symbol_r_stats
 
     def _resolve_group_for_deal(self, deal) -> str:
         """Resolve group for a deal using comment or position mapping."""

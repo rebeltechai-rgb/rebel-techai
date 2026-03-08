@@ -15,7 +15,7 @@ mt5:
   login: 10018026
   password: "Marty123#"
   server: "Axi-us50-demo"
-  path: "C:/Program Files/Axi MetaTrader 5 Terminal/terminal64.exe"
+  path: "C:/MT5__TRADER/terminal64.exe"
 
 # --- Trading Hours (Kamloops BC / Pacific Time) ---
 trading_hours:

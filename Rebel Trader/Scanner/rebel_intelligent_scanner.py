@@ -1,38 +1,27 @@
 """
-REBEL Intelligent Scanner - Standalone AI-Driven Market Scanner
-================================================================
-A complete standalone scanner with:
+REBEL Intelligent Scanner - Lite (TA-Only)
+=========================================
+Standalone scanner with:
   - Pluggable broker adapter (MT5 by default)
   - Multi-timeframe technical analysis
-  - AI-powered signal reasoning (OpenAI GPT)
   - Adaptive confidence thresholds
   - Continuous scanning loop with configurable interval
   - Entry, SL, TP calculation
-  - Console and file logging
+  - Console logging
+
+Note: This lite version mirrors the full scanner behavior but has no OpenAI option.
 """
 
 import os
-import json
 import time
-import math
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Tuple
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 
 import yaml
 import numpy as np
 import pandas as pd
 
 from broker_adapters import get_adapter
-
-# Optional OpenAI for AI mode
-HAS_OPENAI = False
-openai = None
-try:
-    import openai as _openai
-    openai = _openai
-    HAS_OPENAI = True
-except ImportError:
-    pass
 
 # ============================================================================
 #   CONFIGURATION PATHS (LOCAL TO SCANNER PACKAGE)
@@ -103,6 +92,36 @@ def compute_bollinger(series: pd.Series, period: int = 20, std_dev: float = 2.0)
     return {"upper": upper, "middle": sma, "lower": lower}
 
 
+def compute_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Average Directional Index (ADX)."""
+    high = df["high"]
+    low = df["low"]
+    close = df["close"]
+
+    prev_high = high.shift(1)
+    prev_low = low.shift(1)
+    prev_close = close.shift(1)
+
+    plus_dm = (high - prev_high).clip(lower=0)
+    minus_dm = (prev_low - low).clip(lower=0)
+    plus_dm[plus_dm < minus_dm] = 0
+    minus_dm[minus_dm < plus_dm] = 0
+
+    tr = pd.concat([
+        (high - low),
+        (high - prev_close).abs(),
+        (low - prev_close).abs()
+    ], axis=1).max(axis=1)
+
+    atr_smooth = tr.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    plus_di = 100 * (plus_dm.ewm(alpha=1 / period, adjust=False, min_periods=period).mean() / atr_smooth)
+    minus_di = 100 * (minus_dm.ewm(alpha=1 / period, adjust=False, min_periods=period).mean() / atr_smooth)
+
+    dx = (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10) * 100
+    adx_val = dx.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    return adx_val
+
+
 def compute_slope(series: pd.Series, length: int = 10) -> float:
     """Linear regression slope over last N points."""
     if len(series) < length:
@@ -130,10 +149,9 @@ def compute_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3) 
 
 class RebelIntelligentScanner:
     """
-    Standalone AI-driven market scanner with:
+    Standalone TA-driven market scanner with:
       - Multi-timeframe technical analysis
       - Adaptive confidence thresholds
-      - Optional AI reasoning layer (GPT)
       - Entry/SL/TP calculation
     """
 
@@ -144,7 +162,7 @@ class RebelIntelligentScanner:
 
         # Scanner settings from config
         is_cfg = self.config.get("intelligent_scanner", {})
-        
+
         self.enabled: bool = is_cfg.get("enabled", True)
         self.timeframes: List[str] = is_cfg.get("timeframes", ["M5", "M15", "H1"])
         self.bars: int = is_cfg.get("bars", 400)
@@ -153,58 +171,20 @@ class RebelIntelligentScanner:
         self.show_closed_summary: bool = is_cfg.get("show_closed_summary", False)
         self.show_ta_reasoning: bool = is_cfg.get("show_ta_reasoning", True)
 
-        # Confidence & mode
+        # Confidence & mode (TA-only)
         self.base_min_confidence: int = is_cfg.get("min_confidence", 55)
-        self.mode: str = is_cfg.get("mode", "hybrid")  # ta_only | ai_only | hybrid
+        requested_mode = is_cfg.get("mode", "ta_only")
+        self.mode: str = "ta_only" if requested_mode != "ta_only" else requested_mode
+        self.use_ai: bool = False
 
         # Risk settings
         self.risk_percent: float = is_cfg.get("risk_percent", 2.0)
         self.sl_atr_multiplier: float = is_cfg.get("sl_atr_multiplier", 2.0)
         self.tp_atr_multiplier: float = is_cfg.get("tp_atr_multiplier", 3.0)
 
-        # AI settings
-        self.use_ai: bool = is_cfg.get("use_ai", False)
-        self.ai_model: str = is_cfg.get("ai_model", "gpt-4o-mini")
-        self.ai_max_tokens: int = is_cfg.get("ai_max_tokens", 512)
-
-        # Load API key only when AI is enabled
-        self.api_key_source = "none"
-        self.api_key_masked = None
-        if self.use_ai:
-            ai_cfg = self.config.get("ai", {}) or {}
-            api_key = (
-                os.environ.get("OPENAI_API_KEY")
-                or is_cfg.get("openai_api_key")
-                or ai_cfg.get("openai_api_key")
-            )
-            api_key = api_key.strip() if isinstance(api_key, str) else api_key
-            source = "none"
-            if os.environ.get("OPENAI_API_KEY"):
-                source = "env"
-            elif is_cfg.get("openai_api_key"):
-                source = "intelligent_scanner"
-            elif ai_cfg.get("openai_api_key"):
-                source = "ai"
-
-            if os.environ.get("OPENAI_API_KEY") and is_cfg.get("openai_api_key"):
-                print("[AI] Note: OPENAI_API_KEY env overrides intelligent_scanner key")
-
-            self.api_key_source = source
-
-            if api_key and HAS_OPENAI and openai:
-                openai.api_key = api_key
-                masked = f"...{api_key[-4:]}" if len(api_key) >= 4 else "***"
-                self.api_key_masked = masked
-                print(f"[AI] OpenAI API key configured (source={source}, key={masked})")
-            else:
-                present = "yes" if api_key else "no"
-                print(f"[AI] Key present={present} | source={source} | OpenAI loaded={HAS_OPENAI}")
-                print("[AI] Warning: use_ai=True but OpenAI not available or no API key")
-                self.use_ai = False
-
         # Symbols
         self.symbols: List[str] = []
-        
+
         # Stats tracking
         self.scan_count = 0
         self.signal_count = 0
@@ -247,16 +227,16 @@ class RebelIntelligentScanner:
         """Resolve config symbol to broker symbol (handles suffixes like .a, .m, .fs)."""
         sym_map = {self._normalize_symbol(s.name): s.name for s in all_symbols}
         base = self._normalize_symbol(config_symbol)
-        
+
         # Exact match
         if base in sym_map:
             return sym_map[base]
-        
+
         # Find matches with suffixes, prefer non-.sa (standard over Select)
         matches = [s.name for s in all_symbols if self._normalize_symbol(s.name).startswith(base)]
         if not matches:
             return None
-        
+
         # Prefer standard account symbols (not .sa)
         standard = [m for m in matches if not m.lower().endswith('.sa')]
         return min(standard, key=len) if standard else matches[0]
@@ -269,7 +249,7 @@ class RebelIntelligentScanner:
         cfg_symbols = self.config.get("symbols", {})
         groups = cfg_symbols.get("groups", {})
 
-        for group_name, group_cfg in groups.items():
+        for _, group_cfg in groups.items():
             if isinstance(group_cfg, dict):
                 if not group_cfg.get("enabled", True):
                     continue
@@ -308,7 +288,7 @@ class RebelIntelligentScanner:
                 print("[SCANNER] Warning: resolution returned 0 symbols; using config symbols as-is")
         else:
             self.symbols = config_symbols
-            
+
         return self.symbols
 
     def ensure_symbol(self, symbol: str) -> bool:
@@ -405,7 +385,15 @@ class RebelIntelligentScanner:
             overall = "strong_down"
             trend_score = 25
 
-        return {"per_tf": per_tf, "overall": overall, "trend_score": trend_score}
+        adx_val = 0
+        for tf in ("H1", "M15", "M5"):
+            if tf in mtf_data:
+                adx_series = compute_adx(mtf_data[tf])
+                if not adx_series.empty:
+                    adx_val = float(adx_series.iloc[-1])
+                break
+
+        return {"per_tf": per_tf, "overall": overall, "trend_score": trend_score, "adx": adx_val}
 
     def _analyze_momentum(self, df: pd.DataFrame) -> Dict[str, Any]:
         """RSI and MACD momentum analysis."""
@@ -614,79 +602,6 @@ class RebelIntelligentScanner:
         return reasons
 
     # ========================================================================
-    #   AI REASONING LAYER
-    # ========================================================================
-
-    def _ai_analyze(self, symbol: str, tf_main: str, tech_summary: Dict[str, Any]) -> Dict[str, Any]:
-        """AI-powered analysis using GPT."""
-        if not self.use_ai or not HAS_OPENAI or openai is None or not openai.api_key:
-            return {"ai_confidence": None, "direction_override": None, "reasoning": []}
-
-        try:
-            prompt = f"""You are REBEL INTELLIGENT SCANNER, an expert FX/CFD trading analyst.
-
-Analyze this trading setup and provide your assessment:
-
-Symbol: {symbol}
-Timeframe: {tf_main}
-
-Technical Analysis Summary:
-{json.dumps(tech_summary, indent=2)}
-
-Based on this data, provide your analysis as JSON with these exact fields:
-{{
-  "direction": "long" | "short" | "none",
-  "ai_confidence": <integer 0-100>,
-  "reasoning": ["bullet point 1", "bullet point 2", ...],
-  "key_levels": {{"support": <price>, "resistance": <price>}},
-  "risk_assessment": "low" | "medium" | "high"
-}}
-
-Be conservative. Only recommend trades with clear setups. Consider:
-- Trend alignment across timeframes
-- Momentum confirmation
-- Volatility conditions
-- Price structure
-
-Respond ONLY with valid JSON, no markdown or explanation."""
-
-            response = openai.chat.completions.create(
-                model=self.ai_model,
-                messages=[
-                    {"role": "system", "content": "You are a professional trading analyst. Respond only with valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=self.ai_max_tokens,
-                temperature=0.1,
-            )
-
-            content = response.choices[0].message.content.strip()
-            # Clean potential markdown wrapping
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            
-            data = json.loads(content)
-
-            return {
-                "ai_confidence": int(data.get("ai_confidence", 0)),
-                "direction_override": data.get("direction") if data.get("direction") in ("long", "short") else None,
-                "reasoning": data.get("reasoning", []),
-                "key_levels": data.get("key_levels", {}),
-                "risk_assessment": data.get("risk_assessment", "medium")
-            }
-
-        except Exception as e:
-            return {
-                "ai_confidence": None,
-                "direction_override": None,
-                "reasoning": [f"AI analysis error: {str(e)}"],
-                "key_levels": {},
-                "risk_assessment": "unknown"
-            }
-
-    # ========================================================================
     #   LOT SIZE CALCULATION
     # ========================================================================
 
@@ -761,7 +676,7 @@ Respond ONLY with valid JSON, no markdown or explanation."""
 
         try:
             lot = self._calc_lot(symbol, entry, sl)
-        except Exception as e:
+        except Exception:
             lot = symbol_info.volume_min
 
         return {
@@ -826,33 +741,13 @@ Respond ONLY with valid JSON, no markdown or explanation."""
         final_conf = base_conf
 
         ai_block = {
-            "enabled": self.use_ai,
+            "enabled": False,
             "ai_confidence": None,
             "reasoning": [],
             "direction_override": None,
             "key_levels": {},
             "risk_assessment": "unknown"
         }
-
-        # AI analysis if enabled
-        if self.use_ai and self.mode in ("hybrid", "ai_only"):
-            tech_summary = {
-                "trend": trend_info,
-                "momentum": momentum_info,
-                "volatility": vol_info,
-                "structure": struct_info,
-                "base_direction": direction,
-                "base_confidence": base_conf,
-            }
-            ai_res = self._ai_analyze(symbol, tf_main, tech_summary)
-            ai_block.update(ai_res)
-
-            if self.mode == "ai_only" and ai_block["ai_confidence"] is not None:
-                final_conf = ai_block["ai_confidence"]
-                direction = ai_block["direction_override"] or direction
-            elif self.mode == "hybrid" and ai_block["ai_confidence"] is not None:
-                # Weighted average (60% TA, 40% AI)
-                final_conf = int((base_conf * 0.6) + (ai_block["ai_confidence"] * 0.4))
 
         # Final filter
         raw_direction = direction
@@ -909,7 +804,7 @@ Respond ONLY with valid JSON, no markdown or explanation."""
         print(f"\n{'='*70}")
         print(f"REBEL INTELLIGENT SCANNER - Scan #{self.scan_count + 1}")
         print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Mode: {self.mode.upper()} | AI: {'ON' if self.use_ai else 'OFF'}")
+        print(f"Mode: {self.mode.upper()} | AI: OFF")
         for symbol in self.symbols:
             if self.is_market_open(symbol):
                 open_symbols.append(symbol)
@@ -954,13 +849,16 @@ Respond ONLY with valid JSON, no markdown or explanation."""
                 conf = sig["final_confidence"]
                 trend = sig["trend"]["overall"]
                 levels = sig.get("trade_levels", {})
-                
+
                 arrow = "[+]" if direction == "LONG" else "[-]"
                 print(f"{arrow} {sym:10} | {direction:5} | {conf:3d}% | Trend: {trend}")
-                
+
                 if levels:
-                    print(f"    Entry: {levels.get('entry', 'N/A')} | SL: {levels.get('sl', 'N/A')} | TP: {levels.get('tp', 'N/A')} | Lot: {levels.get('lot', 'N/A')}")
-                
+                    print(
+                        f"    Entry: {levels.get('entry', 'N/A')} | SL: {levels.get('sl', 'N/A')} | "
+                        f"TP: {levels.get('tp', 'N/A')} | Lot: {levels.get('lot', 'N/A')}"
+                    )
+
                 if self.show_ta_reasoning and sig.get("ta_reasoning"):
                     for idx, reason in enumerate(sig["ta_reasoning"]):
                         prefix = "    TA:" if idx == 0 else "       "
@@ -999,8 +897,8 @@ Respond ONLY with valid JSON, no markdown or explanation."""
     def run(self, continuous: bool = True):
         """Main scanning loop."""
         print("\n" + "=" * 70)
-        print("  REBEL INTELLIGENT SCANNER v2.0")
-        print("  AI-Driven Market Analysis Engine")
+        print("  REBEL INTELLIGENT SCANNER LITE")
+        print("  TA-Driven Market Analysis Engine")
         print("=" * 70)
 
         if not self.connect():
@@ -1018,11 +916,6 @@ Respond ONLY with valid JSON, no markdown or explanation."""
         print(f"[CONFIG] Symbols: {len(self.symbols)}")
         print(f"[CONFIG] Scan interval: {self.scan_interval}s")
         print(f"[CONFIG] Risk: {self.risk_percent}% | SL: {self.sl_atr_multiplier}x ATR | TP: {self.tp_atr_multiplier}x ATR")
-        
-        if self.use_ai:
-            print(f"[CONFIG] AI Model: {self.ai_model}")
-            key_info = self.api_key_masked or "none"
-            print(f"[CONFIG] AI Key: {self.api_key_source} ({key_info})")
 
         print("\n[STATUS] Scanner running... Press Ctrl+C to stop\n")
 
@@ -1058,11 +951,9 @@ def load_config() -> Dict[str, Any]:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="REBEL Intelligent Scanner - AI-Driven Market Analysis")
+    parser = argparse.ArgumentParser(description="REBEL Intelligent Scanner Lite - TA-Driven Market Analysis")
     parser.add_argument("--once", action="store_true", help="Run single scan and exit")
     parser.add_argument("--interval", type=int, default=None, help="Scan interval in seconds")
-    parser.add_argument("--mode", choices=["ta_only", "ai_only", "hybrid"], default=None, help="Scanner mode")
-    parser.add_argument("--ai", action="store_true", help="Enable AI analysis")
     parser.add_argument("--min_confidence", type=int, default=None, help="Override min confidence (0-100)")
     parser.add_argument("--show_ta_reasons", action="store_true", help="Show TA reasoning per signal")
     args = parser.parse_args()
@@ -1076,14 +967,14 @@ if __name__ == "__main__":
 
     if args.interval:
         config["intelligent_scanner"]["scan_interval"] = args.interval
-    if args.mode:
-        config["intelligent_scanner"]["mode"] = args.mode
-    if args.ai:
-        config["intelligent_scanner"]["use_ai"] = True
     if args.min_confidence is not None:
         config["intelligent_scanner"]["min_confidence"] = args.min_confidence
     if args.show_ta_reasons:
         config["intelligent_scanner"]["show_ta_reasoning"] = True
+
+    # Force TA-only mode in lite
+    config["intelligent_scanner"]["mode"] = "ta_only"
+    config["intelligent_scanner"]["use_ai"] = False
 
     # Create and run scanner
     scanner = RebelIntelligentScanner(config)

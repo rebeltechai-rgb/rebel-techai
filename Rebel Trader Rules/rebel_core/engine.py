@@ -159,7 +159,14 @@ class RebelEngine:
             deploy_at = int(ai_cfg.get("gpt_deploy_start", 1750))
             print(f"GPT Shadow: ACTIVE — logging to gpt_shadow_log.jsonl")
             print(f"GPT Deploy: At {deploy_at} governed trades GPT decides on its own")
-        is_label = "Integrated" if self.scanner else ("Confidence Gate" if self.intelligent_scanner_enabled else "Standalone only")
+        if self._scanner_primary:
+            is_label = "PRIMARY (Lite Scanner)"
+        elif self.scanner:
+            is_label = "Integrated"
+        elif self.intelligent_scanner_enabled:
+            is_label = "Confidence Gate"
+        else:
+            is_label = "Standalone only"
         print(f"Scanner: {is_label}")
         if self.rr_blocker_enabled:
             print(f"R:R Blocker: ACTIVE (min_trades={self.rr_blocker_min_trades})")
@@ -439,12 +446,19 @@ class RebelEngine:
             if virtual_open or stats['total_trades'] > 0:
                 print(f"[DRY RUN] Virtual: {len(virtual_open)} open | "
                       f"{stats['wins']}W/{stats['losses']}L ({stats['win_rate']}%) | "
-                      f"P&L: ${stats['total_profit']:+.2f}")
+                      f"P&L: ${stats['total_profit']:+.2f} | R: {stats.get('total_r', 0):+.2f}")
                 family_stats = self.executor.get_family_stats()
                 if family_stats:
-                    summary = self._format_family_stats(family_stats)
+                    summary = self._format_family_stats_r(family_stats)
                     if summary:
                         print(f"[DRY RUN] By family: {summary}")
+                sym_r = self.executor.get_symbol_r_stats()
+                if sym_r:
+                    sym_parts = sorted(sym_r.items(), key=lambda x: x[1]["total_r"], reverse=True)
+                    sym_summary = " | ".join(
+                        f"{s}:{d['total_r']:+.1f}R({d['trades']})" for s, d in sym_parts
+                    )
+                    print(f"[DRY RUN] By symbol: {sym_summary}")
         
         # Update profit locks on existing positions
         self._update_profit_locks(positions)
@@ -1632,6 +1646,23 @@ class RebelEngine:
             if key == "unknown" and len(family_stats) > 1:
                 continue
             parts.append(f"{key}:{stats.get('wins',0)}W/{stats.get('losses',0)}L({stats.get('win_rate',0)}%)")
+        return " | ".join(parts)
+
+    def _format_family_stats_r(self, family_stats: Dict[str, Any]) -> str:
+        """Format per-family stats with R-multiple for dry run."""
+        order = ["majors", "crosses", "metals", "indices", "energy", "softs", "crypto", "unknown"]
+        parts = []
+        for key in order:
+            if key not in family_stats:
+                continue
+            stats = family_stats[key]
+            if key == "unknown" and len(family_stats) > 1:
+                continue
+            total_r = stats.get("total_r", 0.0)
+            parts.append(
+                f"{key}:{stats.get('wins',0)}W/{stats.get('losses',0)}L "
+                f"R:{total_r:+.1f}"
+            )
         return " | ".join(parts)
 
     def _compute_setup_quality(self, score: int, confidence: int, conf_min: int) -> str:

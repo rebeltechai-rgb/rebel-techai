@@ -12,10 +12,8 @@ echo.
 REM Change to REBEL Trader Rules directory
 cd /d "C:\Rebel Technologies\Rebel Trader Rules"
 
-REM Start MT5 terminal first (minimized)
-echo Starting MT5 Terminal...
-start "" /min "C:\MT5__TRADER\terminal64.exe"
-timeout /t 5 /nobreak > nul
+REM MT5 should already be running — don't restart it
+REM If MT5 is not running, start it manually first.
 
 REM Run REBEL Trader Rules
 echo Starting REBEL Trader Rules...
